@@ -1,5 +1,5 @@
 [tool.poetry]
-name = "spkcspider-messages"
+name = "spkcspider-messaging"
 description = "Safe online messaging"
 version = "0.1a"
 authors = ["Alexander Kaftan"]
