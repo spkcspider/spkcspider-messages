@@ -4,7 +4,7 @@ description = "Safe online messaging"
 version = "0.1a"
 authors = ["Alexander Kaftan"]
 readme = "README.md"
-repository = ""
+repository = "https://github.com/spkcspider/spkcspider-messaging"
 
 [tool.poetry.dependencies]
 python = ">=3.5"
