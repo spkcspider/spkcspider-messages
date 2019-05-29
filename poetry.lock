@@ -225,7 +225,7 @@ description = "A secure, decentral platform for maintaining your online identity
 name = "spkcspider"
 optional = false
 python-versions = ">=3.5"
-version = "0.8a3"
+version = "0.8a4"
 
 [package.dependencies]
 bleach = "*"
@@ -271,7 +271,7 @@ django = []
 test = []
 
 [metadata]
-content-hash = "5cb8769f1dc0ab8460ee4f1a7d3429448340fe6593bf5f0d28ce1fa1e3853012"
+content-hash = "8cc982c1f1ed24aeac13a8038b35ed3b0662d25e8dbb340434fdfb8469bd9b32"
 python-versions = ">=3.5"
 
 [metadata.hashes]
@@ -297,7 +297,7 @@ pytz = ["303879e36b721603cc54604edcac9d20401bdbe31e1e4fdee5b9f98d5d31dfda", "d74
 rdflib = ["58d5994610105a457cff7fdfe3d683d87786c5028a45ae032982498a7e913d6f", "da1df14552555c5c7715d8ce71c08f404c988c58a1ecd38552d0da4fc261280d"]
 requests = ["11e007a8a2aa0323f5a921e9e6a2d7e4e67d9877e85773fba9ba6419025cbeb4", "9cf5292fcd0f598c671cfc1e0d7d1a7f13bb8085e9a590f48c010551dc6c4b31"]
 six = ["3350809f0555b11f552448330d0b52d5f24c91a322ea4a15ef22629740f3761c", "d16a0141ec1a18405cd4ce8b4613101da75da0e9a7aec5bdd4fa804d0e0eba73"]
-spkcspider = ["3bf3b12ca8e57b24c5eb9089a7389987b4cf2a814d069b6fa7132a8bdbcf0f75", "cfdb569112db8f6326e7fff18ceebed90b7d9260ebb24b937fd8ba469d48c451"]
+spkcspider = ["b2e76659a112b07ac1bd88c05ea6ba784d447a5f7791909439c09bc489281195", "e2e2f42ecb38534c52b0f417dbb1a9796f8c03e01d39ac940b82aced03c479bd"]
 sqlparse = ["40afe6b8d4b1117e7dff5504d7a8ce07d9a1b15aeeade8a2d10f130a834f8177", "7c3dca29c022744e95b547e867cee89f4fce4373f3549ccd8797d8eb52cdb873"]
 urllib3 = ["06330f386d6e4b195fbfc736b297f58c5a892e4440e54d294d7004e3a9bbea1b", "cc44da8e1145637334317feebd728bd869a35285b93cbb4cca2577da7e62db4f"]
 webencodings = ["a0af1213f3c2226497a97e2b3aa01a7e4bee4f403f95be16fc9acd2947514a78", "b36a1c245f2d304965eb4e0a82848379241dc04b865afcc4aab16748587e1923"]

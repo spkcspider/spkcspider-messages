@@ -11,12 +11,12 @@ python = ">=3.5"
 
 
 [tool.poetry.dev-dependencies]
-spkcspider = ">=0.8a2"
+spkcspider = ">=0.8a4"
 
 
 [tool.poetry.extras]
 django = ["spkcspider>=0.7"]
-test = ["spkcspider[test]>=0.8a2"]
+test = ["spkcspider[test]>=0.8a4"]
 
 [tool.tox]
 legacy_tox_ini = """
