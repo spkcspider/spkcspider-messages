@@ -120,7 +120,7 @@ class PostBox(BaseContent):
     @classmethod
     def feature_urls(cls, name):
         return [
-            ActionUrl(reverse("spider_messages:webreference"), "webrefpush")
+            ActionUrl("webrefpush", reverse("spider_messages:webreference"))
         ]
 
     def get_form_kwargs(self, **kwargs):
@@ -188,7 +188,8 @@ class WebReference(models.Model):
                                 kwargs["hostpart"],
                                 self.request.path
                             )
-                        )
+                        ),
+                        "Connection": "close"
                     },
                     stream=True,
                     **get_requests_params(self.url)

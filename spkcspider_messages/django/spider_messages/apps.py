@@ -2,6 +2,10 @@ __all__ = ["SpiderMessageConfig"]
 
 from django.apps import AppConfig
 
+from .signals import (
+    CleanMessageContentsCb, CleanReferenceCb, successful_transmitted
+)
+
 
 class SpiderMessageConfig(AppConfig):
     name = 'spkcspider_messages.django.spider_messages'
@@ -10,9 +14,6 @@ class SpiderMessageConfig(AppConfig):
     spider_url_path = 'spidermessages/'
 
     def ready(self):
-        from .signals import (
-            CleanMessageContentsCb, CleanReferenceCb, successful_transmitted
-        )
 
         successful_transmitted.connect(
             CleanMessageContentsCb,
