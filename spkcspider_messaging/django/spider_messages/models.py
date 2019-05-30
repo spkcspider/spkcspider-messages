@@ -13,6 +13,7 @@ from django.utils.translation import pgettext, gettext_lazy as _
 from django.core.files.storage import default_storage
 from django.core.uploadedfile import TemporaryUploadedFile
 from django.core.exceptions import ValidationError
+from django.test import Client
 
 
 from jsonfield import JSONField
@@ -179,57 +180,87 @@ class WebReference(models.Model):
 
     def access_message(self, kwargs):
         if self.cached_size is None:
-            try:
-                with requests.get(
-                    self.url,
-                    headers={
-                        "Referer": merge_get_url(
-                            "%s%s" % (
-                                kwargs["hostpart"],
-                                self.request.path
-                            )
-                        ),
-                        "Connection": "close"
-                    },
-                    stream=True,
-                    **get_requests_params(self.url)
-                ) as resp:
-                    resp.raise_for_status()
+            params, can_inline = get_requests_params(self.url)
+            if can_inline:
+                resp = Client().get(
+                    self.url, follow=True, secure=True, Connection="close",
+                    Referer=merge_get_url(
+                        "%s%s" % (
+                            kwargs["hostpart"],
+                            self.request.path
+                        )
+                    )
+                )
+                if resp.status_code < 400:
                     c_length = resp.headers.get("content-length", None)
                     if (
                         c_length is None or
                         c_length > int(settings.MAX_UPLOAD_SIZE)
                     ):
-                        return HttpResponse("Too big", status=413)
+                        return HttpResponse(
+                            "Too big/not specified", status=413
+                        )
                     fp = TemporaryUploadedFile()
-                    try:
-                        for chunk in resp.iter_content(fp.DEFAULT_CHUNK_SIZE):
-                            fp.write(chunk)
-                    except Exception:
-                        del fp
-                        raise
+                    for chunk in resp:
+                        fp.write(chunk)
                     self.postbox.update_used_space(fp.size)
                     self.cached_size = fp.size
                     # saves also cached_size
                     self.cached_content.save("", fp)
+            else:
+                try:
+                    with requests.get(
+                        self.url,
+                        headers={
+                            "Referer": merge_get_url(
+                                "%s%s" % (
+                                    kwargs["hostpart"],
+                                    self.request.path
+                                )
+                            ),
+                            "Connection": "close"
+                        },
+                        stream=True,
+                        **params
+                    ) as resp:
+                        resp.raise_for_status()
+                        c_length = resp.headers.get("content-length", None)
+                        if (
+                            c_length is None or
+                            c_length > int(settings.MAX_UPLOAD_SIZE)
+                        ):
+                            return HttpResponse("Too big", status=413)
+                        fp = TemporaryUploadedFile()
+                        try:
+                            for chunk in resp.iter_content(
+                                fp.DEFAULT_CHUNK_SIZE
+                            ):
+                                fp.write(chunk)
+                        except Exception:
+                            del fp
+                            raise
+                        self.postbox.update_used_space(fp.size)
+                        self.cached_size = fp.size
+                        # saves also cached_size
+                        self.cached_content.save("", fp)
 
-            except requests.exceptions.SSLError as exc:
-                logger.info(
-                    "referrer: \"%s\" has a broken ssl configuration",
-                    self.url, exc_info=exc
-                )
-                return HttpResponse("ssl error", status=502)
-            except ValidationError as exc:
-                logging.info(
-                    "Quota exceeded", exc_info=exc
-                )
-                return HttpResponse("Quota", status=413)
-            except Exception as exc:
-                logging.info(
-                    "file retrieval failed: \"%s\" failed",
-                    self.url, exc_info=exc
-                )
-                return HttpResponse("other error", status=502)
+                except requests.exceptions.SSLError as exc:
+                    logger.info(
+                        "referrer: \"%s\" has a broken ssl configuration",
+                        self.url, exc_info=exc
+                    )
+                    return HttpResponse("ssl error", status=502)
+                except ValidationError as exc:
+                    logging.info(
+                        "Quota exceeded", exc_info=exc
+                    )
+                    return HttpResponse("Quota", status=413)
+                except Exception as exc:
+                    logging.info(
+                        "file retrieval failed: \"%s\" failed",
+                        self.url, exc_info=exc
+                    )
+                    return HttpResponse("other error", status=502)
 
         ret = CbFileResponse(
             self.cached_content.open("rb")
