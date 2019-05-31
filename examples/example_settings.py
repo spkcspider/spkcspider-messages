@@ -1,13 +1,16 @@
 # flake8: noqa
 
 from spkcspider.settings import *  # noqa: F403, F401
+import os
+
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 INSTALLED_APPS += [
     'spkcspider.apps.spider_filets',
     'spkcspider.apps.spider_keys',
     'spkcspider.apps.spider_tags',
     'spkcspider.apps.spider_webcfg',
-    'spkcspider_messages.django.spider_messages'
+    'spkcspider_messaging.django.spider_messages'
 
 ]
 # SECURITY WARNING: don't run with debug turned on in production!
@@ -25,9 +28,6 @@ DATABASES = {
         'NAME': os.path.join(BASE_DIR, 'db.sqlite3'),
     }
 }
-
-CELERY_BROKER_URL = "redis://127.0.0.1:6379"
-CELERY_RESULT_BACKEND = "redis://127.0.0.1:6379"
 
 # specify fixtures directory for tests
 # FIXTURE_DIRS = [

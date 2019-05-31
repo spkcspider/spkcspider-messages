@@ -11,7 +11,7 @@ from django.http import HttpResponse, HttpResponsePermanentRedirect
 from django.conf import settings
 from django.utils.translation import pgettext, gettext_lazy as _
 from django.core.files.storage import default_storage
-from django.core.uploadedfile import TemporaryUploadedFile
+from django.core.files.uploadedfile import TemporaryUploadedFile
 from django.core.exceptions import ValidationError
 from django.test import Client
 
@@ -27,7 +27,7 @@ from spkcspider.apps.spider.contents import BaseContent
 from spkcspider.apps.spider.conf import TOKEN_SIZE
 from spkcspider.apps.spider.constants import VariantType, ActionUrl
 
-from spkcspider_messages.constants import ReferenceType
+from spkcspider_messaging.constants import ReferenceType
 
 from .http import CbFileResponse
 
@@ -86,7 +86,7 @@ class PostBox(BaseContent):
             "name": "PostBox",
             "ctype": (
                 VariantType.unique + VariantType.component_feature +
-                VariantType.connect_feature
+                VariantType.feature_connect
             ),
             "strength": 0
         },
@@ -166,17 +166,33 @@ class WebReference(models.Model):
         """
         assert len(self.key_list) > 0
         if self.rtype == ReferenceType.message.value:
+            kwargs["rtype"] = ReferenceType.message
             return self.access_message(kwargs)
         elif self.rtype == ReferenceType.redirect.value:
+            kwargs["rtype"] = ReferenceType.redirect
             return self.access_redirect(kwargs)
         elif self.rtype == ReferenceType.content.value:
-            raise NotImplementedError
+            kwargs["rtype"] = ReferenceType.content
+            return self.access_message(kwargs)
         return HttpResponse(status=501)
 
     def access_redirect(self, kwargs):
-        return HttpResponsePermanentRedirect(
+        ret = HttpResponsePermanentRedirect(
             redirect_to=self.url
         )
+        ret["X-TYPE"] = kwargs["rtype"].name
+        ret["X-KEYLIST"] = json.dumps(self.key_list)
+        self.copies.filter(
+            keyhash=kwargs["request"].POST.get("keyhash", "")
+        ).update(received=True)
+        # remove completed
+        for i in WebReference.objects.exclude(
+            copies__received=False
+        ):
+            i.cached_content.delete(False)
+            # triggers other signals and removes content cleanly
+            i.associated.delete()
+        return ret
 
     def access_message(self, kwargs):
         if self.cached_size is None:
@@ -265,6 +281,10 @@ class WebReference(models.Model):
         ret = CbFileResponse(
             self.cached_content.open("rb")
         )
+        ret.refcopies = self.copies.filter(
+            keyhash=kwargs["request"].POST.get("keyhash", "")
+        )
+        ret["X-TYPE"] = kwargs["rtype"].name
         ret["X-KEYLIST"] = json.dumps(self.key_list)
         return ret
 
@@ -279,7 +299,7 @@ class WebReferenceCopies(models.Model):
 
     class Meta():
         unique_together = [
-            ("content", "keyhash")
+            ("ref", "keyhash")
         ]
 
 

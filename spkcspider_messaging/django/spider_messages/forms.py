@@ -4,7 +4,7 @@ __all__ = ["ReferenceForm", "PostBoxForm", "MessageForm"]
 from django import forms
 
 from .models import WebReference, PostBox, MessageContent
-from spkcspider_messages.constants import ReferenceType
+from spkcspider_messaging.constants import ReferenceType
 
 
 class ReferenceForm(forms.ModelForm):

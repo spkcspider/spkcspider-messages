@@ -13,7 +13,7 @@ urlpatterns = [
     ),
     path(
         'message/',
-        MessageContentView.as_view(scope=""),
+        MessageContentView.as_view(),
         name='message'
     )
 ]

@@ -8,10 +8,14 @@ repository = "https://github.com/spkcspider/spkcspider-messaging"
 
 [tool.poetry.dependencies]
 python = ">=3.5"
+rdflib = '*'
+html5lib = '*'
+cryptography = "*"
 
 
 [tool.poetry.dev-dependencies]
 spkcspider = ">=0.8"
+django-extensions = "*"
 
 
 [tool.poetry.extras]
