@@ -1,5 +1,6 @@
 db.sqlite3
 celery.sqlite3
+key.*
 
 cgihandler.cgi
 cgihandler.fcgi
