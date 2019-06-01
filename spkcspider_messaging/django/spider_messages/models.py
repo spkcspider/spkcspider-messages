@@ -187,7 +187,7 @@ class WebReference(models.Model):
         ret["X-TYPE"] = kwargs["rtype"].name
         ret["X-KEYLIST"] = json.dumps(self.key_list)
         self.copies.filter(
-            keyhash=kwargs["request"].POST.get("keyhash", "")
+            keyhash__in=kwargs["request"].POST.getlist("keyhash")
         ).update(received=True)
         # remove completed
         for i in WebReference.objects.exclude(
@@ -286,7 +286,7 @@ class WebReference(models.Model):
             self.cached_content.open("rb")
         )
         ret.refcopies = self.copies.filter(
-            keyhash=kwargs["request"].POST.get("keyhash", "")
+            keyhash__in=kwargs["request"].POST.getlist("keyhash")
         )
         ret["X-TYPE"] = kwargs["rtype"].name
         ret["X-KEYLIST"] = json.dumps(self.key_list)

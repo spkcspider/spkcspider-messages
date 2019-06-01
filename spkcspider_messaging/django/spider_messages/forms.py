@@ -31,6 +31,10 @@ class PostBoxForm(forms.ModelForm):
 
     def __init__(self, scope, **kwargs):
         super().__init__(**kwargs)
+        self.fields["keys"].queryset = \
+            self.fields["keys"].queryset.filter(
+                info__contains="\x1epubkeyhash="
+            )
 
 
 class MessageForm(forms.ModelForm):

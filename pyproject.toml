@@ -21,6 +21,7 @@ django-extensions = "*"
 [tool.poetry.extras]
 django = ["spkcspider>=0.8"]
 test = ["spkcspider[test]>=0.8"]
+email = ["aiosmtpd"]
 
 [tool.tox]
 legacy_tox_ini = """
