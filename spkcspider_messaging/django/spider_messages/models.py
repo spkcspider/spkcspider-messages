@@ -23,7 +23,7 @@ import requests
 from spkcspider.apps.spider.helpers import (
     merge_get_url, get_requests_params, create_b64_token
 )
-from spkcspider.apps.spider.contents import BaseContent
+from spkcspider.apps.spider.contents import BaseContent, add_content
 from spkcspider.apps.spider.conf import TOKEN_SIZE
 from spkcspider.apps.spider.constants import VariantType, ActionUrl
 
@@ -78,6 +78,7 @@ def get_send_content_path(instance, filename):
     return ret_path
 
 
+@add_content
 class PostBox(BaseContent):
     expose_name = False
     expose_description = True
@@ -123,6 +124,9 @@ class PostBox(BaseContent):
         return [
             ActionUrl("webrefpush", reverse("spider_messages:webreference"))
         ]
+
+    def get_strength_link(self):
+        return 11
 
     def get_form_kwargs(self, **kwargs):
         ret = super().get_form_kwargs(**kwargs)
@@ -303,6 +307,7 @@ class WebReferenceCopies(models.Model):
         ]
 
 
+@add_content
 class MessageContent(BaseContent):
     expose_name = False
     expose_description = False
@@ -322,6 +327,9 @@ class MessageContent(BaseContent):
             "strength": 0
         },
     ]
+
+    def get_strength_link(self):
+        return 11
 
     def access_raw_update(self, **kwargs):
         pass
