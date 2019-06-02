@@ -72,6 +72,7 @@ class ReferenceView(UserTestMixin, View):
     def post(self, request, *args, **kwargs):
         """ create new message reference """
         form = self.form_class(
+            instance=WebReference(postbox=self.object),
             create=True,
             data=self.request.POST,
             files=self.request.FILES,

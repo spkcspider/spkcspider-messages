@@ -1,5 +1,4 @@
 import os
-import ssl
 import asyncio
 from datetime import datetime as dt, timedelta as td
 
@@ -10,10 +9,23 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives import serialization
 
-from aiosmtpd.smtp import SMTP
+from OpenSSL import crypto
+
+from twisted.internet import asyncioreactor, protocol, ssl
+from twisted.protocols.basic import LineReceiver
 
 from .cmd import parser
-from .base import Email2SpiderHandler, load_priv_key
+from .core import load_priv_key
+from .smtp import Email2SpiderHandler
+
+
+class startTLSServer(LineReceiver):
+    def lineReceived(self, line):
+        if line == "STARTTLS":
+            self.sendLine('READY')
+            self.transport.startTLS(self.factory.options)
+        else:
+            self.transport.loseConnection()
 
 
 def main(argv):
@@ -94,19 +106,43 @@ def main(argv):
         del pkey
     ctx = None
     if os.path.exists(argv.cert):
-        ctx = ssl.SSLContext()
-        try:
-            ctx.load_cert_chain(argv.cert, argv.keys[0], pw)
-        except ssl.SSLError:
-            ctx = None
+        pubdata = None
+        with open(argv.cert, "rb") as f:
+            pubdata = f.read()
+        privdata = None
+        with open(argv.keys[0], "rb") as f:
+            privdata = f.read()
+
+        ctx = ssl.PrivateCertificate.load(
+            pubdata, privdata, crypto.FILETYPE_PEM
+        )
 
     loop = asyncio.new_event_loop()
-    SMTP(
-        Email2SpiderHandler(),
-        hostname=":".join([argv.address, str(argv.port)]),
-        tls_context=ctx,
-        require_starttls=not argv.unencrypted,
-        loop=loop
-    )
+    reactor = asyncioreactor.AsyncioSelectorReactor(loop)
+    if ctx:
+        smtp_factory = protocol.protocol.Factory.forProtocol(startTLSServer)
+        smtp_factory.options = ssl.optionsForClientTLS(
+            argv.address, ctx
+        )
+    else:
+        smtp_factory = protocol.ServerFactory()
+    smtp_factory.protocol = smtp
+    reactor.listenTCP(argv.smtp, smtp_factory, interface=argv.address)
+    if ctx:
+        pop3_factory = protocol.protocol.Factory.forProtocol(startTLSServer)
+        pop3_factory.options = ssl.optionsForClientTLS(
+            argv.address, ctx
+        )
+    else:
+        pop3_factory = protocol.ServerFactory()
+    pop3_factory.protocol = pop3.POP3
+    reactor.listenTCP(argv.pop3, pop3_factory, interface=argv.address)
+    # SMTP(
+    #     Email2SpiderHandler(),
+    #     hostname=":".join([argv.address, str(argv.port)]),
+    #     tls_context=ctx,
+    #     require_starttls=not argv.unencrypted,
+    #     loop=loop
+    # )
     print("started")
     loop.run_forever()

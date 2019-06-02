@@ -1,4 +1,7 @@
-
+__all__ = [
+    "PostBox", "WebReference", "WebReferenceCopy", "MessageContent",
+    "MessageCopy", "MessageReceiver"
+]
 import json
 import posixpath
 import logging
@@ -293,7 +296,7 @@ class WebReference(models.Model):
         return ret
 
 
-class WebReferenceCopies(models.Model):
+class WebReferenceCopy(models.Model):
     id = models.BigAutoField(primary_key=True)
     ref = models.ForeignKey(
         WebReference, related_name="copies", on_delete=models.CASCADE
@@ -346,7 +349,7 @@ class MessageContent(BaseContent):
         return ret
 
 
-class MessageCopies(models.Model):
+class MessageCopy(models.Model):
     id = models.BigAutoField(primary_key=True)
     content = models.ForeignKey(
         MessageContent, related_name="copies", on_delete=models.CASCADE

@@ -6,13 +6,6 @@ import argparse
 parser = argparse.ArgumentParser(
     description='Run email2spkcspider pipeline'
 )
-parser.add_argument(
-    '--address', "-a", action='store', help="served address",
-    default="127.0.0.1"
-)
-parser.add_argument(
-    '--port', "-p", action='store', type=int, help='port', default=25
-)
 # parser.add_argument(
 #     '-6', action="store_true", help="Use ipv6", dest="family"
 # )
@@ -42,4 +35,16 @@ parser.add_argument(
 parser.add_argument(
     'postboxes', nargs='+',
     help='Postboxes checked for new messages'
+)
+parser.add_argument(
+    '--address', "-a", action='store', help="served address",
+    default="127.0.0.1"
+)
+
+parser.add_argument(
+    '--smtp', action='store', type=int, help='port of smtp service', default=25
+)
+parser.add_argument(
+    '--pop3', action='store', type=int, help='port of pop3 service',
+    default=143
 )

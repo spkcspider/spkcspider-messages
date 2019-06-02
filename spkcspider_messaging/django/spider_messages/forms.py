@@ -1,10 +1,12 @@
 __all__ = ["ReferenceForm", "PostBoxForm", "MessageForm"]
 
-
+from django.db.models import Q
 from django import forms
+from django.utils.translation import gettext as _
+
+from spkcspider_messaging.constants import ReferenceType
 
 from .models import WebReference, PostBox, MessageContent
-from spkcspider_messaging.constants import ReferenceType
 
 
 class ReferenceForm(forms.ModelForm):
@@ -16,6 +18,22 @@ class ReferenceForm(forms.ModelForm):
     def __init__(self, create=False, **kwargs):
         self.create = create
         super().__init__(**kwargs)
+
+    def clean_key_list(self):
+        ret = self.cleaned_data["key_list"]
+        q = Q()
+        for i in ret.keys():
+            q |= Q(
+                associated_rel__info__contains="\x1epubkeyhash=%s" %
+                i
+            )
+
+        if self.instance.keys.exclude(q):
+            raise forms.ValidationError(
+                _("invalid keys"),
+                code="invalid_keys"
+            )
+        return ret
 
     def _save_m2m(self):
         super()._save_m2m()
