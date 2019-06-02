@@ -29,7 +29,8 @@ parser.add_argument(
     help='Certificate (used for smtp encryption)'
 )
 parser.add_argument(
-    '--unencrypted', "-u", action="store_true", help="Don't use encryption"
+    '--unencrypted', "-u", action="store_true",
+    help="Allow also unencrypted pop3/smtp connections"
 )
 
 parser.add_argument(
@@ -42,9 +43,10 @@ parser.add_argument(
 )
 
 parser.add_argument(
-    '--smtp', action='store', type=int, help='port of smtp service', default=25
+    '--smtp', action='store', type=int, help='port of smtp service',
+    default=25, dest="smtp_port"
 )
 parser.add_argument(
     '--pop3', action='store', type=int, help='port of pop3 service',
-    default=143
+    default=143, dest="pop3_port"
 )

@@ -4,6 +4,8 @@ from twisted.internet import defer
 
 from zope.interface import implementer
 
+from .core import startTLSFactory
+
 
 @implementer(smtp.IMessage)
 class ConsoleMessage:
@@ -25,32 +27,38 @@ class ConsoleMessage:
 
 
 @implementer(smtp.IMessageDelivery)
-class ConsoleMessageDelivery:
+class SpiderPostBoxDelivery:
+    postboxes = None
+    pseudo_names = {"spider", "spkcspider"}
+
+    def __init__(self, postboxes):
+        self.postboxes = set(postboxes)
+
     def receivedHeader(self, helo, origin, recipients):
         return "Received: ConsoleMessageDelivery"
 
     def validateFrom(self, helo, origin):
-        # All addresses are accepted
+        if origin.domain not in self.postboxes:
+            raise smtp.SMTPBadSender(origin)
         return origin
 
     def validateTo(self, user):
-        # Only messages directed to the "console" user are accepted.
-        if user.dest.local == "console":
+        if user.dest.local in self.pseudo_names:
             return lambda: ConsoleMessage()
         raise smtp.SMTPBadRcpt(user)
 
 
-class ConsoleSMTPFactory(smtp.SMTPFactory):
+class SMTPFactory(startTLSFactory):
+    domain = smtp.DNSNAME
+    timeout = 600
+    delivery = None
     protocol = smtp.ESMTP
 
-    def __init__(self, *a, **kw):
-        smtp.SMTPFactory.__init__(self, *a, **kw)
-        self.delivery = ConsoleMessageDelivery()
+    portal = None
 
     def buildProtocol(self, addr):
-        p = smtp.SMTPFactory.buildProtocol(self, addr)
+        p = self.protocol()
+        p.portal = self.portal
         p.delivery = self.delivery
-        return p
-
-class SmtpEndpoint(object):
-    pass
+        p.host = self.domain
+        return super().buildProtocol(p)
