@@ -1,4 +1,5 @@
 
+import requests
 from twisted.mail import smtp
 from twisted.mail import pop3
 from .core import startTLSFactory
@@ -30,6 +31,7 @@ class Mailbox:
         @raise ValueError or IndexError: When the index does not correspond to
             a message in the mailbox.  The use of ValueError is preferred.
         """
+        requests
         return []
 
     def getMessage(self, i):
