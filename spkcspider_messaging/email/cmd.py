@@ -34,8 +34,8 @@ parser.add_argument(
 )
 
 parser.add_argument(
-    'postboxes', nargs='+',
-    help='Postboxes checked for new messages'
+    'postbox',
+    help='Postbox checked for new messages'
 )
 parser.add_argument(
     '--address', "-a", action='store', help="served address",

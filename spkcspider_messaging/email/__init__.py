@@ -16,8 +16,8 @@ from twisted.internet import asyncioreactor, ssl
 
 from .cmd import parser
 from .core import load_priv_key
-from .smtp import SMTPFactory
-from .pop3 import POP3Factory
+from .pop3 import POP3Factory, SpiderPostbox
+from .smtp import SMTPFactory, SpiderDelivery
 
 logger = logging.getLogger(__name__)
 
@@ -115,6 +115,7 @@ def main(argv):
     reactor = asyncioreactor.AsyncioSelectorReactor(loop)
     smtp_factory = SMTPFactory()
     smtp_factory.domain = argv.address
+    smtp_factory.delivery = SpiderDelivery(argv.postbox)
     smtp_factory.encryption_required = not argv.unencrypted
     if ctx:
         smtp_factory.cert_options = ssl.optionsForClientTLS(
@@ -124,9 +125,10 @@ def main(argv):
 
     pop3_factory = POP3Factory()
     pop3_factory.domain = argv.address
+    pop3_factory.mbox = SpiderPostbox(argv.postbox)
     pop3_factory.encryption_required = not argv.unencrypted
     if ctx:
-        pop3_factory.options = ssl.optionsForClientTLS(
+        pop3_factory.cert_options = ssl.optionsForClientTLS(
             argv.address, ctx
         )
     reactor.listenTCP(argv.pop3_port, pop3_factory, interface=argv.address)

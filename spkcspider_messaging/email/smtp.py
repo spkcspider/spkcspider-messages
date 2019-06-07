@@ -1,3 +1,5 @@
+__all__ = ["SpiderDelivery", "SMTPFactory"]
+
 
 from twisted.mail import smtp
 from twisted.internet import defer
@@ -8,7 +10,7 @@ from .core import startTLSFactory
 
 
 @implementer(smtp.IMessage)
-class ConsoleMessage:
+class SpiderMessage:
     def __init__(self):
         self.lines = []
 
@@ -27,24 +29,24 @@ class ConsoleMessage:
 
 
 @implementer(smtp.IMessageDelivery)
-class SpiderPostBoxDelivery:
-    postboxes = None
+class SpiderDelivery:
+    postbox = None
     pseudo_names = {"spider", "spkcspider"}
 
-    def __init__(self, postboxes):
-        self.postboxes = set(postboxes)
+    def __init__(self, postbox):
+        self.postbox = postbox
 
     def receivedHeader(self, helo, origin, recipients):
         return "Received: ConsoleMessageDelivery"
 
     def validateFrom(self, helo, origin):
-        if origin.domain not in self.postboxes:
+        if origin.domain != self.postbox:
             raise smtp.SMTPBadSender(origin)
         return origin
 
     def validateTo(self, user):
         if user.dest.local in self.pseudo_names:
-            return lambda: ConsoleMessage()
+            return lambda: SpiderMessage()
         raise smtp.SMTPBadRcpt(user)
 
 

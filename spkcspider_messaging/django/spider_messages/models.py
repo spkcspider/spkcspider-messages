@@ -148,6 +148,16 @@ class PostBox(BaseContent):
             return HttpResponse(status=410)
         return ref.access(kwargs)
 
+    def access_delref(self, **kwargs):
+        ret = self.references.filter(
+            id__in=kwargs["request"].GET.get("reference")
+        )
+        if ret.count() == 0:
+            return HttpResponse(status=410)
+
+        ret.delete()
+        return HttpResponse(status=200)
+
     def get_info(self):
         return super().get_info(unlisted=True)
 

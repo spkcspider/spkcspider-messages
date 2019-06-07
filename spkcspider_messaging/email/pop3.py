@@ -1,3 +1,4 @@
+__all__ = ["SpiderPostbox", "POP3Factory"]
 
 import requests
 from twisted.mail import smtp
@@ -9,30 +10,20 @@ from zope.interface import implementer
 
 
 @implementer(pop3.IMailbox)
-class Mailbox:
-    """
-    A base class for mailboxes.
-    """
+class SpiderPostbox:
+    postbox = None
+
+    def __init__(self, postbox):
+        self.postbox = postbox
+
+    def _listMessages(self, i=None):
+        with requests.get(self.postbox) as resp:
+            ret = sorted(resp.json.items(), key=lambda x: x[0])
+            ret = list(map(lambda x: x[1]["size"], ret))
+            return ret
+
     def listMessages(self, i=None):
-        """
-        Retrieve the size of a message, or, if none is specified, the size of
-        each message in the mailbox.
-
-        @type i: L{int} or L{None}
-        @param i: The 0-based index of the message.
-
-        @rtype: L{int}, sequence of L{int}, or L{Deferred <defer.Deferred>}
-        @return: The number of octets in the specified message, or, if an
-            index is not specified, a sequence of the number of octets for
-            all messages in the mailbox or a deferred which fires with
-            one of those. Any value which corresponds to a deleted message
-            is set to 0.
-
-        @raise ValueError or IndexError: When the index does not correspond to
-            a message in the mailbox.  The use of ValueError is preferred.
-        """
-        requests
-        return []
+        return self._listMessages
 
     def getMessage(self, i):
         """
@@ -63,6 +54,9 @@ class Mailbox:
         @raise ValueError or IndexError: When the index does not correspond to
             a message in the mailbox.  The use of ValueError is preferred.
         """
+        return "{}?reference={}".format(
+            self.postbox, i
+        )
         raise ValueError
 
     def deleteMessage(self, i):
@@ -101,6 +95,7 @@ class POP3Factory(startTLSFactory):
     domain = smtp.DNSNAME
     timeout = 300
     protocol = pop3.POP3
+    mbox = None
 
     portal = None
 
@@ -109,4 +104,5 @@ class POP3Factory(startTLSFactory):
         p.portal = self.portal
         p.host = self.domain
         p.timeOut = self.timeout
+        p.mbox = self.mbox
         return super().buildProtocol(p)
