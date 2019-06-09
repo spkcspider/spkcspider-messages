@@ -1,6 +1,6 @@
 __all__ = ("ReferenceView", "MessageContentView")
 
-from django.conf import settings
+# from django.conf import settings
 from django.http import Http404, JsonResponse, HttpResponse
 from django.shortcuts import get_object_or_404
 
@@ -64,8 +64,13 @@ class ReferenceView(UserTestMixin, View):
         """ Return tokens """
         return JsonResponse(
             {
-                "hash_algorithm": settings.SPIDER_HASH_ALGORITHM.name,
-                "keys": [k.key for k in self.object.keys.all()]
+                # "hash_algorithm": settings.SPIDER_HASH_ALGORITHM.name,
+                "keys": {
+                    (k.associated.getlist("pubkeyhash", 1)[0], k.key)
+                    for k in self.object.keys.prefetch(
+                        "associated_rel"
+                    ).all()
+                }
             }
         )
 

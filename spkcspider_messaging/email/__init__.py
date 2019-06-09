@@ -79,7 +79,6 @@ def main(argv):
     keylist = {}
     pw = None
     for num, key_path in enumerate(argv.keys):
-        data = None
         pkey = None
         with open(key_path, "rb") as f:
             if num == 0:
@@ -96,7 +95,6 @@ def main(argv):
             digest = hashes.Hash(argv.hash, backend=default_backend())
             digest.update(pem_public)
             keylist[digest.finalize().hex()] = pkey
-        del data
         del pkey
     ctx = None
     if os.path.exists(argv.cert):

@@ -14,7 +14,7 @@ parser.add_argument(
     help="Don't generate private key/certificate automatically"
 )
 parser.add_argument(
-    '--keysize', "-s", action='store', default=8192,
+    '--keysize', "-s", action='store', default=8192, type=int,
     help="Keysize for auto generated keys"
 )
 parser.add_argument(

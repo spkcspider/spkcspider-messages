@@ -1,12 +1,16 @@
 __all__ = ["ReferenceForm", "PostBoxForm", "MessageForm"]
 
 import json
+from urllib.parse import urljoin
+
 
 from django.db.models import Q
 from django import forms
+from django.urls import reverse
 from django.utils.translation import gettext as _
 
 from spkcspider_messaging.constants import ReferenceType
+from spkcspider.apps.spider.conf import get_anchor_domain, get_anchor_scheme
 
 from .models import WebReference, PostBox, MessageContent
 
@@ -23,14 +27,16 @@ class ReferenceForm(forms.ModelForm):
 
     def clean_key_list(self):
         ret = self.cleaned_data["key_list"]
+        if isinstance(ret, str):
+            ret = json.loads(ret)
         q = Q()
         for i in ret.keys():
-            q |= Q(
-                associated_rel__info__contains="\x1epubkeyhash=%s" %
+            q |= ~Q(
+                keys__associated_rel__info__contains="\x1epubkeyhash=%s" %
                 i
             )
 
-        if self.instance.keys.exclude(q):
+        if self.model.objects.filter(q):
             raise forms.ValidationError(
                 _("invalid keys"),
                 code="invalid_keys"
@@ -77,10 +83,26 @@ class PostBoxForm(forms.ModelForm):
 
 class MessageForm(forms.ModelForm):
     own_hash = forms.CharField(required=False, initial="")
+    url = forms.CharField(disabled=True, initial="")
 
     class Meta:
         model = MessageContent
         fields = ["encrypted_content", "key_list"]
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        if self.instance.id:
+            self.fields["url"].initial = urljoin(
+                "{}://{}".format(
+                    get_anchor_scheme(),
+                    get_anchor_domain()
+                ), reverse(
+                    "spider_messages:message"
+                ),
+                "?"
+            )
+        else:
+            del self.fields["url"]
 
     def _save_m2m(self):
         super()._save_m2m()

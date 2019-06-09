@@ -18,11 +18,11 @@ def load_priv_key(data):
     pw = None
     defbackend = default_backend()
     try:
-        key = load_pem_private_key(data, None)
+        key = load_pem_private_key(data, None, defbackend)
     except ValueError:
         pass
     except TypeError:
-        key = load_pem_private_key(data, None, defbackend)
+        backend = load_pem_private_key
     if not backend:
         try:
             key = load_der_private_key(data, None, defbackend)

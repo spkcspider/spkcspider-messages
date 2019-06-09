@@ -16,6 +16,7 @@ from django.utils.translation import pgettext, gettext_lazy as _
 from django.core.files.storage import default_storage
 from django.core.files.uploadedfile import TemporaryUploadedFile
 from django.core.exceptions import ValidationError
+from django.views.decorators.csrf import csrf_exempt
 from django.test import Client
 
 
@@ -90,7 +91,7 @@ class PostBox(BaseContent):
             "name": "PostBox",
             "ctype": (
                 VariantType.unique + VariantType.component_feature +
-                VariantType.feature_connect
+                VariantType.feature_connect + VariantType.domain_mode
             ),
             "strength": 0
         },
@@ -140,6 +141,11 @@ class PostBox(BaseContent):
         from .forms import PostBoxForm as f
         return f
 
+    @csrf_exempt
+    def access_view(self, **kwargs):
+        return super().access_view(**kwargs)
+
+    @csrf_exempt
     def access_ref(self, **kwargs):
         ref = self.references.filter(
             id=kwargs["request"].GET.get("reference")
@@ -154,7 +160,7 @@ class PostBox(BaseContent):
         )
         if ret.count() == 0:
             return HttpResponse(status=410)
-
+        # TODO: form
         ret.delete()
         return HttpResponse(status=200)
 
@@ -298,9 +304,10 @@ class WebReference(models.Model):
         ret = CbFileResponse(
             self.cached_content.open("rb")
         )
-        ret.refcopies = self.copies.filter(
-            keyhash__in=kwargs["request"].POST.getlist("keyhash")
-        )
+        if kwargs["request"].POST.get("keyhash"):
+            ret.refcopies = self.copies.filter(
+                keyhash__in=kwargs["request"].POST.getlist("keyhash")
+            )
         ret["X-TYPE"] = kwargs["rtype"].name
         ret["X-KEYLIST"] = json.dumps(self.key_list)
         return ret
@@ -335,7 +342,8 @@ class MessageContent(BaseContent):
             "name": "MessageContent",
             "ctype": (
                 VariantType.unlisted + VariantType.machine +
-                VariantType.no_export + VariantType.raw_update
+                VariantType.no_export
+                # + VariantType.raw_update
             ),
             "strength": 0
         },
@@ -344,14 +352,19 @@ class MessageContent(BaseContent):
     def get_strength_link(self):
         return 11
 
+    def get_form(self, scope):
+        from .forms import MessageForm
+        return MessageForm
+
     def access_raw_update(self, **kwargs):
         pass
 
+    @csrf_exempt
     def access_view(self, **kwargs):
         ret = CbFileResponse(
             self.cached_content
         )
-        if "keyhash" in kwargs["request"].POST:
+        if kwargs["request"].POST.get("keyhash"):
             ret.msgcopies = self.copies.filter(
                 keyhash__in=kwargs["request"].POST.getlist("keyhash")
             )
