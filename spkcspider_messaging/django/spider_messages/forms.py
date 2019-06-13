@@ -13,7 +13,6 @@ from django.utils.translation import gettext as _
 from spkcspider_messaging.constants import ReferenceType
 from spkcspider.apps.spider.conf import get_anchor_domain, get_anchor_scheme
 from spkcspider.apps.spider.helpers import get_hashob
-from spkcspider.apps.spider.fields import MultipleChoiceField
 from .widgets import SignatureWidget
 
 from .models import WebReference, PostBox, MessageContent
@@ -59,12 +58,12 @@ class PostBoxForm(forms.ModelForm):
         widget=forms.HiddenInput(), disabled=True
     )
     combined_keyhash = forms.CharField(
-        label=_("Key activation hash", help_text=_(
+        label=_("Key activation hash"), help_text=_(
             "Re-sign with every active key for activating new key "
             "or removing a key"
-        ))
+        )
     )
-    signatures = MultipleChoiceField(
+    signatures = forms.MultipleChoiceField(
         widget=SignatureWidget(
             item_label=_("Signature")
         ), required=False
@@ -99,11 +98,11 @@ class PostBoxForm(forms.ModelForm):
 
         self.fields["keys"].queryset = \
             self.fields["keys"].queryset.filter(
-                info__contains="\x1epubkeyhash="
+                associated_rel__info__contains="\x1epubkeyhash="
             )
-        if self.instance.id:
+        if self.instance.id and self.instance.keys.exists():
             mapped_hashes = map(
-                lambda x: self.extract_pupkeyhash.match(x).group(1),
+                lambda x: self.extract_pupkeyhash.search(x).group(1),
                 self.instance.keys.values_list(
                     "associated_rel__info", flat=True
                 )
@@ -113,8 +112,17 @@ class PostBoxForm(forms.ModelForm):
             for mh in mapped_hashes:
                 ho.update(mh.encode("ascii", "ignore"))
             self.fields["combined_keyhash"].initial = ho.finalize().hex()
+            self.fields["signatures"].initial = [
+                {
+                    "hash": x.key.associated.getlist("hash", 1)[0].split(
+                        "=", 1
+                    )[-1],
+                    "signature": x.signature
+                } for x in self.instance.key_infos.all()
+            ]
         else:
             del self.fields["combined_keyhash"]
+            del self.fields["signatures"]
 
     def clean_keys(self):
         ret = self.cleaned_data["keys"]

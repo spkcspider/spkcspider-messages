@@ -3,7 +3,7 @@
 from spkcspider.settings import *  # noqa: F403, F401
 import os
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 INSTALLED_APPS += [
     'spkcspider.apps.spider_filets',

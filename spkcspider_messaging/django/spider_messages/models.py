@@ -180,6 +180,7 @@ class PostBoxKey(models.Model):
         "spider_keys.PublicKey", related_name="+", on_delete=models.CASCADE,
         editable=False
     )
+    signature = models.TextField()
 
 
 class WebReference(models.Model):

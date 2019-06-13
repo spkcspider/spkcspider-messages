@@ -28,8 +28,16 @@ document.addEventListener("DOMContentLoaded", function(){
         "format": "table",
         "items": {
           "title": ilabel,
-          "type": "string",
-          "format": "text"
+          "type": "object",
+          "properties": {
+            "hash": {
+              "type": "string",
+              "readonly": true
+            },
+            "signature": {
+              "type": "string"
+            }
+          }
         }
       }
     });

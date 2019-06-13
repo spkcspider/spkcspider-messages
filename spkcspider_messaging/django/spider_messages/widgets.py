@@ -4,6 +4,7 @@ import json
 
 from django.forms import widgets
 from django.conf import settings
+from django.utils.translation import gettext_lazy as _
 
 
 _extra = '' if settings.DEBUG else '.min'
@@ -18,13 +19,17 @@ class SignatureWidget(widgets.Textarea):
             'spider_messages/SignatureWidget.js'
         ]
 
-    def __init__(self, *, attrs=None, wrapper_attrs=None, **kwargs):
+    def __init__(
+        self, *, attrs=None, wrapper_attrs=None, item_label=_("Item"), **kwargs
+    ):
         if not attrs:
             attrs = {"class": ""}
         if not wrapper_attrs:
             wrapper_attrs = {}
         attrs.setdefault("class", "")
         attrs["class"] += " SignatureEditorTarget"
+        # don't access them as they are lazy evaluated
+        attrs["item_label"] = item_label
         self.wrapper_attrs = wrapper_attrs.copy()
         super().__init__(attrs=attrs, **kwargs)
 

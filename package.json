@@ -1,6 +1,6 @@
 {
   "private": true,
   "dependencies": {
-    "spkcspider" : "git+https://github.com/spkcspider/spkcspider.git"
+    "spkcspider": "git+https://github.com/spkcspider/spkcspider.git"
   }
 }
