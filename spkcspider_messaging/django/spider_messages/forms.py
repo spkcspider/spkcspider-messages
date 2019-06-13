@@ -1,5 +1,6 @@
 __all__ = ["ReferenceForm", "PostBoxForm", "MessageForm"]
 
+import re
 import json
 from urllib.parse import urljoin
 
@@ -11,6 +12,9 @@ from django.utils.translation import gettext as _
 
 from spkcspider_messaging.constants import ReferenceType
 from spkcspider.apps.spider.conf import get_anchor_domain, get_anchor_scheme
+from spkcspider.apps.spider.helpers import get_hashob
+from spkcspider.apps.spider.fields import MultipleChoiceField
+from .widgets import SignatureWidget
 
 from .models import WebReference, PostBox, MessageContent
 
@@ -52,9 +56,21 @@ class ReferenceForm(forms.ModelForm):
 
 class PostBoxForm(forms.ModelForm):
     message_list = forms.CharField(
-        widget=forms.HiddenInput()
+        widget=forms.HiddenInput(), disabled=True
     )
-    combined_keyhash = forms.CharField()
+    combined_keyhash = forms.CharField(
+        label=_("Key activation hash", help_text=_(
+            "Re-sign with every active key for activating new key "
+            "or removing a key"
+        ))
+    )
+    signatures = MultipleChoiceField(
+        widget=SignatureWidget(
+            item_label=_("Signature")
+        ), required=False
+    )
+
+    extract_pupkeyhash = re.compile("\x1epubkeyhash=([^\x1e]+)")
 
     class Meta:
         model = PostBox
@@ -78,12 +94,27 @@ class PostBoxForm(forms.ModelForm):
                         ) for i in self.messages.all()
                     }
                 })
+        else:
+            del self.fields["message_list"]
+
         self.fields["keys"].queryset = \
             self.fields["keys"].queryset.filter(
                 info__contains="\x1epubkeyhash="
             )
         if self.instance.id:
-            pass
+            mapped_hashes = map(
+                lambda x: self.extract_pupkeyhash.match(x).group(1),
+                self.instance.keys.values_list(
+                    "associated_rel__info", flat=True
+                )
+            )
+            mapped_hashes = sorted(mapped_hashes)
+            ho = get_hashob()
+            for mh in mapped_hashes:
+                ho.update(mh.encode("ascii", "ignore"))
+            self.fields["combined_keyhash"].initial = ho.finalize().hex()
+        else:
+            del self.fields["combined_keyhash"]
 
     def clean_keys(self):
         ret = self.cleaned_data["keys"]
