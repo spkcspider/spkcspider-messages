@@ -4,6 +4,8 @@ b64_iv 0 real content
 
 header: X-KEYLIST: json encoded keys
 
+Design: every key used for encryption must sign the hash from all public key hashes (sorted)
+
 
 # TODO:
 * Webrtc

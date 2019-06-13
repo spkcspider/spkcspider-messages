@@ -107,7 +107,8 @@ class PostBox(BaseContent):
         )
     )
     keys = models.ManyToManyField(
-        "spider_keys.PublicKey", related_name="+"
+        "spider_keys.PublicKey", related_name="+",
+        through="spider_messages.PostBoxKey"
     )
 
     def map_data(self, name, field, data, graph, context):
@@ -166,6 +167,19 @@ class PostBox(BaseContent):
 
     def get_info(self):
         return super().get_info(unlisted=True)
+
+
+class PostBoxKey(models.Model):
+    id = models.BigAutoField(primary_key=True)
+    # fix linter warning
+    objects = models.Manager()
+    postbox = models.ForeignKey(
+        PostBox, on_delete=models.CASCADE, related_name="key_infos",
+    )
+    key = models.ForeignKey(
+        "spider_keys.PublicKey", related_name="+", on_delete=models.CASCADE,
+        editable=False
+    )
 
 
 class WebReference(models.Model):

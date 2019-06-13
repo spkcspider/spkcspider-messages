@@ -51,7 +51,10 @@ class ReferenceForm(forms.ModelForm):
 
 
 class PostBoxForm(forms.ModelForm):
-    message_list = forms.Hidden()
+    message_list = forms.CharField(
+        widget=forms.HiddenInput()
+    )
+    combined_keyhash = forms.CharField()
 
     class Meta:
         model = PostBox
@@ -79,6 +82,14 @@ class PostBoxForm(forms.ModelForm):
             self.fields["keys"].queryset.filter(
                 info__contains="\x1epubkeyhash="
             )
+        if self.instance.id:
+            pass
+
+    def clean_keys(self):
+        ret = self.cleaned_data["keys"]
+        if len(ret) == 0:
+            raise forms.ValidationError()
+        return ret
 
 
 class MessageForm(forms.ModelForm):
