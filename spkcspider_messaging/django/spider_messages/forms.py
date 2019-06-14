@@ -4,7 +4,7 @@ import re
 import json
 from urllib.parse import urljoin
 
-
+from django.conf import settings
 from django.db.models import Q
 from django import forms
 from django.urls import reverse
@@ -13,6 +13,7 @@ from django.utils.translation import gettext as _
 from spkcspider_messaging.constants import ReferenceType
 from spkcspider.apps.spider.conf import get_anchor_domain, get_anchor_scheme
 from spkcspider.apps.spider.helpers import get_hashob
+from spkcspider.apps.spider.fields import JsonField
 from .widgets import SignatureWidget
 
 from .models import WebReference, PostBox, MessageContent
@@ -57,16 +58,23 @@ class PostBoxForm(forms.ModelForm):
     message_list = forms.CharField(
         widget=forms.HiddenInput(), disabled=True
     )
+    setattr(message_list, "hashable", False)
     combined_keyhash = forms.CharField(
         label=_("Key activation hash"), help_text=_(
             "Re-sign with every active key for activating new key "
             "or removing a key"
         )
     )
-    signatures = forms.MultipleChoiceField(
+    setattr(combined_keyhash, "hashable", True)
+    hash_algorithm = forms.CharField(
+        widget=forms.HiddenInput(), disabled=True,
+        initial=settings.SPIDER_HASH_ALGORITHM.name
+    )
+    setattr(hash_algorithm, "hashable", False)
+    signatures = JsonField(
         widget=SignatureWidget(
             item_label=_("Signature")
-        ), required=False
+        )
     )
 
     extract_pupkeyhash = re.compile("\x1epubkeyhash=([^\x1e]+)")
@@ -127,6 +135,10 @@ class PostBoxForm(forms.ModelForm):
     def clean_keys(self):
         ret = self.cleaned_data["keys"]
         if len(ret) == 0:
+            raise forms.ValidationError()
+        try:
+            ret[0]["hash"] and ret[0]["signature"]
+        except KeyError:
             raise forms.ValidationError()
         return ret
 

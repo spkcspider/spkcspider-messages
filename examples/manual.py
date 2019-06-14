@@ -4,10 +4,10 @@ import argparse
 import getpass
 import logging
 import base64
-import re
+# import re
 
 import requests
-from cryptography.x509.oid import NameOID
+# from cryptography.x509.oid import NameOID
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes, padding, serialization
@@ -37,7 +37,7 @@ parser.add_argument(
 )
 parser.add_argument(
     '--verbose', "-v", action='count',
-    help='Certificate (used for smtp encryption)'
+    help='Verbosity'
 )
 parser.add_argument(
     'url',
@@ -46,9 +46,10 @@ parser.add_argument(
 subparsers = parser.add_subparsers(dest='action')
 subparsers.add_parser("view")
 subparsers.add_parser("peek")
+subparsers.add_parser("fix")
 send_parser = subparsers.add_parser("send")
 send_parser.add_argument(
-    'dest', action="store",
+    'dest', action="store", required=True,
     help='Destination url'
 )
 
@@ -112,6 +113,11 @@ def main(argv):
     if (
         argv.action in {"view", "peek"} and
         access not in {"view", "ref"}
+    ):
+        argv.exit(1, "url doesn't match action")
+    if (
+        argv.action == "fix" and
+        access != "update"
     ):
         argv.exit(1, "url doesn't match action")
     if argv.action == "send":
@@ -207,8 +213,8 @@ def main(argv):
                 enc = pkey.encrypt(
                     aes_key,
                     padding.OAEP(
-                        mgf=padding.MGF1(algorithm=hashes.SHA512()),
-                        algorithm=hashes.SHA512(),
+                        mgf=padding.MGF1(algorithm=argv.hash),
+                        algorithm=argv.hash,
                         label=None
                     )
                 )
@@ -219,12 +225,20 @@ def main(argv):
                     blob
                 )
             )
+            # create message object
             response = s.post(
                 url_create, body={
                     "own_hash": keyhash,
                     "key_list": key_list
                 }
             )
+
+        elif argv.action == "view":
+            response
+        elif argv.action == "peek":
+            pass
+        elif argv.action == "fix":
+            pass
 
 
 if __name__ == "__main__":
