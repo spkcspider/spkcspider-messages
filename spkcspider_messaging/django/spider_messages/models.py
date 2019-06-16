@@ -350,7 +350,9 @@ class MessageContent(BaseContent):
         upload_to=get_send_content_path, null=True, blank=False
     )
     # required for updates
-    key_list = JSONField(help_text=_("Own encrypted keys"))
+    key_list = JSONField(
+        help_text=_("Own encrypted keys"), default=dict, blank=True
+    )
 
     appearances = [
         {

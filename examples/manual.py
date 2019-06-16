@@ -147,21 +147,21 @@ def main(argv):
     with requests.Session() as s:
         if argv.action == "view":
             response = s.post(
-                merge_get_url(argv.url, raw=True),
+                merge_get_url(argv.url, raw="embed"),
                 body={
                     "keyhash": keyhash
                 }
             )
         else:
             response = s.get(
-                merge_get_url(argv.url, raw=True)
+                merge_get_url(argv.url, raw="embed")
             )
         if not response.ok:
             logging.info("Url returned error: %s", response.text)
             argv.exit(1, "url invalid")
 
         if argv.action == "send":
-            url = merge_get_url(argv.url, raw=True)
+            url = merge_get_url(argv.url, raw="true")
             g = Graph()
             g.parse(data=response.content, format="turtle")
             if (
@@ -171,7 +171,7 @@ def main(argv):
             ) not in g:
                 argv.exit(1, "Source does not support action")
             response_dest = s.get(
-                merge_get_url(argv.dest, raw=True)
+                merge_get_url(argv.dest, raw="embed")
             )
             if not response_dest.ok:
                 logging.info("Dest returned error: %s", response_dest.text)
@@ -200,8 +200,33 @@ def main(argv):
             blob = sys.stdin.read()
             aes_key = AESGCM.generate_key(bit_length=256)
             nonce = os.urandom(20)
-            key_list = {}
+            src_key_list = {}
+            dest_key_list = {}
             defbackend = default_backend()
+            breakpoint()
+            for i in g:
+                postbox_base = g.value()
+
+            # for i in g.objects(
+            #
+            # ):
+            #    try:
+            #        pkey = load_pem_public_key(i[1], None, defbackend)
+            #    except ValueError:
+            #        try:
+            #            pkey = load_der_public_key(i[1], None, defbackend)
+            #        except ValueError:
+            #            raise
+            #    enc = pkey.encrypt(
+            #        aes_key,
+            #        padding.OAEP(
+            #            mgf=padding.MGF1(algorithm=argv.hash),
+            #            algorithm=argv.hash,
+            #            label=None
+            #        )
+            #    )
+            #    dest_key_list[i[0]] = base64.urlsafe_b64encode(enc)
+
             for i in dest_info["keys"].items():
                 try:
                     pkey = load_pem_public_key(i[1], None, defbackend)
@@ -218,7 +243,7 @@ def main(argv):
                         label=None
                     )
                 )
-                key_list[i[0]] = base64.urlsafe_b64encode(enc)
+                dest_key_list[i[0]] = base64.urlsafe_b64encode(enc)
             ctx = AESGCM(aes_key)
             blob = ctx.encrypt(
                 nonce, b"Type: message\n\n%b" % (
@@ -229,7 +254,13 @@ def main(argv):
             response = s.post(
                 url_create, body={
                     "own_hash": keyhash,
-                    "key_list": key_list
+                    "key_list": src_key_list
+                }
+            )
+            response_dest = s.post(
+                dest_create, body={
+                    "": None,
+                    "key_list": dest_key_list
                 }
             )
 

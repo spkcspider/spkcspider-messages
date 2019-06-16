@@ -76,6 +76,7 @@ class PostBoxForm(forms.ModelForm):
             item_label=_("Signature")
         )
     )
+    setattr(signatures, "hashable", False)
 
     extract_pupkeyhash = re.compile("\x1epubkeyhash=([^\x1e]+)")
 
@@ -132,8 +133,8 @@ class PostBoxForm(forms.ModelForm):
             del self.fields["combined_keyhash"]
             del self.fields["signatures"]
 
-    def clean_keys(self):
-        ret = self.cleaned_data["keys"]
+    def clean_signatures(self):
+        ret = self.cleaned_data["signatures"]
         if len(ret) == 0:
             raise forms.ValidationError()
         try:
