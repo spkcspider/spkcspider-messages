@@ -1,9 +1,11 @@
+import io
 import sys
 import os
 import argparse
 import getpass
 import logging
 import base64
+import json
 # import re
 
 import requests
@@ -112,7 +114,7 @@ def main(argv):
     access = match.groupdict()["access"]
     if (
         argv.action in {"view", "peek"} and
-        access not in {"view", "ref"}
+        access not in {"view", "ref", "list"}
     ):
         argv.exit(1, "url doesn't match action")
     if (
@@ -254,7 +256,10 @@ def main(argv):
             response = s.post(
                 url_create, body={
                     "own_hash": keyhash,
-                    "key_list": src_key_list
+                    "key_list": src_key_list,
+                    "encrypted_content": io.BytesIO(
+                        b"%b\0%b" % (nonce, blob)
+                    )
                 }
             )
             response_dest = s.post(
@@ -264,10 +269,31 @@ def main(argv):
                 }
             )
 
-        elif argv.action == "view":
-            response
-        elif argv.action == "peek":
-            pass
+        elif argv.action in {"view", "peek"}:
+            if access == "list":
+                pass
+                # TODO
+            if access == "ref":
+                key_list = json.loads(response.headers["X-KEYLIST"])
+                key = key_list.get("keyhash", None)
+                if not key:
+                    argv.exit(0, "message not for me")
+                decrypted_key = pkey.decrypt(
+                    key,
+                    padding.OAEP(
+                        mgf=padding.MGF1(algorithm=argv.hash),
+                        algorithm=argv.hash,
+                        label=None
+                    )
+                )
+                ctx = AESGCM(decrypted_key)
+                nonce, content = response.content.split(b"\0", 1)
+                blob = ctx.decrypt(nonce, content)
+                headers, content = blob.split(b"\n\n", 1)
+                print(content)
+            else:
+                pass
+                # view
         elif argv.action == "fix":
             pass
 

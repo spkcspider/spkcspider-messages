@@ -12,6 +12,8 @@ _extra = '' if settings.DEBUG else '.min'
 
 class SignatureWidget(widgets.Textarea):
     template_name = 'spider_base/forms/widgets/wrapped_textarea.html'
+    # for view form
+    allow_multiple_selected = True
 
     class Media:
         js = [

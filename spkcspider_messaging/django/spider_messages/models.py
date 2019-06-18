@@ -194,6 +194,7 @@ class WebReference(models.Model):
         upload_to=get_cached_content_path, blank=True
     )
     cached_size = models.PositiveIntegerField(null=True, blank=True)
+    # not really a list; a dict
     key_list = JSONField(help_text=_("encrypted keys for content"))
 
     def access(self, kwargs):
@@ -236,31 +237,37 @@ class WebReference(models.Model):
         if self.cached_size is None:
             params, can_inline = get_requests_params(self.url)
             if can_inline:
-                resp = Client().get(
-                    self.url, follow=True, secure=True, Connection="close",
-                    Referer=merge_get_url(
-                        "%s%s" % (
-                            kwargs["hostpart"],
-                            self.request.path
+                try:
+                    resp = Client().get(
+                        self.url, follow=True, secure=True, Connection="close",
+                        Referer=merge_get_url(
+                            "%s%s" % (
+                                kwargs["hostpart"],
+                                self.request.path
+                            )
                         )
                     )
-                )
-                if resp.status_code < 400:
-                    c_length = resp.headers.get("content-length", None)
-                    if (
-                        c_length is None or
-                        c_length > int(settings.MAX_UPLOAD_SIZE)
-                    ):
-                        return HttpResponse(
-                            "Too big/not specified", status=413
-                        )
-                    fp = TemporaryUploadedFile()
-                    for chunk in resp:
-                        fp.write(chunk)
-                    self.postbox.update_used_space(fp.size)
-                    self.cached_size = fp.size
-                    # saves also cached_size
-                    self.cached_content.save("", fp)
+                    if resp.status_code < 400:
+                        c_length = resp.headers.get("content-length", None)
+                        if (
+                            c_length is None or
+                            c_length > int(settings.MAX_UPLOAD_SIZE)
+                        ):
+                            return HttpResponse(
+                                "Too big/not specified", status=413
+                            )
+                        fp = TemporaryUploadedFile()
+                        for chunk in resp:
+                            fp.write(chunk)
+                        self.postbox.update_used_space(fp.size)
+                        self.cached_size = fp.size
+                        # saves also cached_size
+                        self.cached_content.save("", fp)
+                except ValidationError as exc:
+                    logging.info(
+                        "Quota exceeded", exc_info=exc
+                    )
+                    return HttpResponse("Quota", status=413)
             else:
                 try:
                     with requests.get(

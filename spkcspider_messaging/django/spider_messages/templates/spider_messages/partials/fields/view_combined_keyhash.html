@@ -1,0 +1,10 @@
+{% load spider_rdf %}
+<li style="word-break:break-all;" typeof="spkc:Property">
+  <data hidden="hidden" property="spkc:fieldname" datatype="xsd:string">{{field.html_name}}</data>
+  <data hidden="hidden" property="spkc:name" datatype="xsd:string">{{field.name}}</data>
+  {% hashable_literalize field as hashable %}
+  <data hidden="hidden" property="spkc:hashable" datatype="xsd:boolean">{{hashable}}</data>
+  <div>{{ field.label_tag }}</div>
+  {% literalize field as LiteralData %}
+  <span property="spkc:value" datatype="{{LiteralData.datatype}}" content="{{LiteralData}}" class="w3-white">{{field|field_to_python}}</span>
+</li>

@@ -66,6 +66,11 @@ class PostBoxForm(forms.ModelForm):
         )
     )
     setattr(combined_keyhash, "hashable", True)
+    setattr(
+        combined_keyhash,
+        "view_form_field_template",
+        "spider_messages/partials/fields/view_combined_keyhash.html"
+    )
     hash_algorithm = forms.CharField(
         widget=forms.HiddenInput(), disabled=True,
         initial=settings.SPIDER_HASH_ALGORITHM.name
@@ -77,6 +82,11 @@ class PostBoxForm(forms.ModelForm):
         )
     )
     setattr(signatures, "hashable", False)
+    setattr(
+        signatures,
+        "view_form_field_template",
+        "spider_messages/partials/fields/view_signatures.html"
+    )
 
     extract_pupkeyhash = re.compile("\x1epubkeyhash=([^\x1e]+)")
 
@@ -87,20 +97,17 @@ class PostBoxForm(forms.ModelForm):
     def __init__(self, scope, **kwargs):
         super().__init__(**kwargs)
         if scope in {"view", "raw"}:
-            self.fields["message_list"] = \
+            self.fields["message_list"].initial = \
                 json.dumps({
-                    "messages": {
+                    "messages": [
                         (
                             i.id,
                             {
-                                "size": (
-                                    0 if i.cached_size is None else
-                                    i.cached_size
-                                ),
+                                "size": i.cached_size,
                                 "sender": i.url.split("?", 1)[0]
                             }
-                        ) for i in self.messages.all()
-                    }
+                        ) for i in self.instance.references.all()
+                    ]
                 })
         else:
             del self.fields["message_list"]
