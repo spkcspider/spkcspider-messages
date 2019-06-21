@@ -147,16 +147,25 @@ def main(argv):
         keyhash = digest.finalize().hex()
 
     with requests.Session() as s:
-        if argv.action == "view":
+        if access == "list":
+            response = s.get(
+                merge_get_url(
+                    argv.url, raw="embed", info="_type=PostBox"
+                ),
+                body={
+                    "keyhash": keyhash
+                }
+            )
+        elif argv.action == "view":
             response = s.post(
-                merge_get_url(argv.url, raw="embed"),
+                merge_get_url(argv.url, raw="true"),
                 body={
                     "keyhash": keyhash
                 }
             )
         else:
             response = s.get(
-                merge_get_url(argv.url, raw="embed")
+                merge_get_url(argv.url, raw="true")
             )
         if not response.ok:
             logging.info("Url returned error: %s", response.text)
@@ -270,9 +279,6 @@ def main(argv):
             )
 
         elif argv.action in {"view", "peek"}:
-            if access == "list":
-                pass
-                # TODO
             if access == "ref":
                 key_list = json.loads(response.headers["X-KEYLIST"])
                 key = key_list.get("keyhash", None)
@@ -292,7 +298,22 @@ def main(argv):
                 headers, content = blob.split(b"\n\n", 1)
                 print(content)
             else:
-                pass
+                q = list(g.query(
+                    """
+                        SELECT DISTINCT ?value
+                        WHERE {
+                            ?a spkc:name "message_list" .
+                            ?a spkc:value ?value .
+                        }
+                    """,
+                    initNs={"spkc": spkcgraph}
+                ))
+                if len(q) == 0:
+                    argv.exit(1, "postbox not found")
+                q = json.loads(q[0])
+                print("Messages:")
+                for i in q:
+                    print(q["url"])
                 # view
         elif argv.action == "fix":
             pass

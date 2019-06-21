@@ -187,6 +187,7 @@ class WebReference(models.Model):
     id = models.BigAutoField(primary_key=True)
     url = models.URLField(max_length=600)
     rtype = models.CharField(max_length=1)
+    created = models.DateTimeField(auto_now_add=True, editable=False)
     postbox = models.ForeignKey(
         PostBox, related_name="references", on_delete=models.CASCADE
     )
