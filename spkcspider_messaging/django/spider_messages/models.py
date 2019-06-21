@@ -133,6 +133,9 @@ class PostBox(BaseContent):
     def get_strength_link(self):
         return 11
 
+    def get_references(self):
+        return self.keys.values_list("associated_rel", flat=True)
+
     def get_form_kwargs(self, **kwargs):
         ret = super().get_form_kwargs(**kwargs)
         ret["scope"] = kwargs["scope"]

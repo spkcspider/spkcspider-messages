@@ -158,14 +158,14 @@ def main(argv):
             )
         elif argv.action == "view":
             response = s.post(
-                merge_get_url(argv.url, raw="true"),
+                merge_get_url(argv.url, raw="embed"),
                 body={
                     "keyhash": keyhash
                 }
             )
         else:
             response = s.get(
-                merge_get_url(argv.url, raw="true")
+                merge_get_url(argv.url, raw="embed")
             )
         if not response.ok:
             logging.info("Url returned error: %s", response.text)
@@ -214,6 +214,21 @@ def main(argv):
             src_key_list = {}
             dest_key_list = {}
             defbackend = default_backend()
+            for i in g.query(
+                """
+                    SELECT DISTINCT ?key_value
+                    WHERE {
+                        ?base spkc:name ?keys_name .
+                        ?base spkc:value ?key .
+                    }
+                """,
+                initNs={"spkc": spkcgraph},
+                initBindings={
+                    "keys_name": Literal(
+                        "keys", datatype=XSD.string
+                    )
+                }
+            ):
             breakpoint()
             for i in g:
                 postbox_base = g.value()
@@ -302,18 +317,23 @@ def main(argv):
                     """
                         SELECT DISTINCT ?value
                         WHERE {
-                            ?a spkc:name "message_list" .
+                            ?a spkc:name ?message_list .
                             ?a spkc:value ?value .
                         }
                     """,
-                    initNs={"spkc": spkcgraph}
+                    initNs={"spkc": spkcgraph},
+                    initBindings={
+                        "message_list": Literal(
+                            "message_list", datatype=XSD.string
+                        )
+                    }
                 ))
                 if len(q) == 0:
                     argv.exit(1, "postbox not found")
                 q = json.loads(q[0])
                 print("Messages:")
                 for i in q:
-                    print(q["url"])
+                    print(i["id"], i["sender"])
                 # view
         elif argv.action == "fix":
             pass

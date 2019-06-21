@@ -100,13 +100,11 @@ class PostBoxForm(forms.ModelForm):
             self.fields["message_list"].initial = \
                 json.dumps({
                     "messages": [
-                        (
-                            i.id,
-                            {
-                                "size": i.cached_size,
-                                "sender": i.url.split("?", 1)[0]
-                            }
-                        ) for i in self.instance.references.all()
+                        {
+                            "id": i.id,
+                            "size": i.cached_size,
+                            "sender": i.url.split("?", 1)[0]
+                        } for i in self.instance.references.all()
                     ]
                 })
         else:
