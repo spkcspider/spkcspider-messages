@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import io
 import sys
 import os
@@ -23,37 +24,30 @@ from rdflib import Graph, XSD, Literal
 from spkcspider.apps.spider.helpers import merge_get_url
 from spkcspider.apps.spider.constants import static_token_matcher, spkcgraph
 
+logger = logging.getLogger(__name__)
 
 parser = argparse.ArgumentParser(
     description='Store or load message manually'
-)
-parser.add_argument(
-    '--hash', action='store', help="Hash algorithm", default="SHA512"
 )
 parser.add_argument(
     '--key', action='store', dest="key",
     default="key.priv", help='Private Key'
 )
 parser.add_argument(
-    '--cert', action="store", default=argparse.SUPPRESS,
-    help='Certificate (used for smtp encryption)'
-)
-parser.add_argument(
-    '--verbose', "-v", action='count',
+    '--verbose', "-v", action='count', default=0,
     help='Verbosity'
 )
 parser.add_argument(
     'url',
     help='Postbox/Message'
 )
-subparsers = parser.add_subparsers(dest='action')
+subparsers = parser.add_subparsers(dest='action', required=True)
 subparsers.add_parser("view")
 subparsers.add_parser("peek")
 subparsers.add_parser("check")
 send_parser = subparsers.add_parser("send")
 send_parser.add_argument(
-    'dest', action="store", required=True,
-    help='Destination url'
+    'dest', action="store", help='Destination url'
 )
 
 
@@ -99,6 +93,325 @@ def replace_action(url, action):
     )
 
 
+def action_send(argv, access, pkey, pkey_hash, s, response):
+    url = merge_get_url(argv.url, raw="true")
+    g = Graph()
+    g.parse(data=response.content, format="turtle")
+    if (
+        None, spkcgraph["create:name"], Literal(
+            "MessageContent", datatype=XSD.string
+        )
+    ) not in g:
+        argv.exit(1, "Source does not support action")
+    response_dest = s.get(
+        merge_get_url(argv.dest, raw="embed")
+    )
+    if not response_dest.ok:
+        logging.info("Dest returned error: %s", response_dest.text)
+        argv.exit(1, "url invalid")
+    g_dest = Graph()
+    g_dest.parse(data=response.content, format="turtle")
+    dest_create = g_dest.value(
+        predicate=spkcgraph["spkc:feature:name"],
+        object=Literal(
+            "webrefpush", datatype=XSD.string
+        )
+    )
+    dest_info = s.get(dest_create).json
+    url_create = replace_action(url, "add/MessageContent/")
+    response = s.get(url_create)
+    if not response.ok:
+        logging.error("Creation failed: %s", response.text)
+        argv.exit(1, "Creation failed: %s" % response.text)
+    g = Graph()
+    g.parse(data=response.content, format="html")
+    if (
+        None, spkcgraph["spkc:csrftoken"], None
+    ) not in g_dest:
+        logging.error("failure: no csrftoken: %s", response.text)
+        argv.exit(1, "failure: no csrftoken")
+    blob = sys.stdin.read()
+    aes_key = AESGCM.generate_key(bit_length=256)
+    nonce = os.urandom(20)
+    src = {}
+    src_key_list = {}
+    dest_key_list = {}
+    defbackend = default_backend()
+
+    for i in g.query(
+        """
+            SELECT DISTINCT ?key_base, ?key_name, ?key_value
+            WHERE {
+                ?base spkc:name ?keys_name .
+                ?base spkc:value ?keybase .
+                ?key_base spkc:properties ?key_base_prop .
+                ?key_base_prop spkc:name ?key_name .
+                ?key_base_prop spkc:value ?key_value .
+            }
+        """,
+        initNs={"spkc": spkcgraph},
+        initBindings={
+            "keys_name": Literal(
+                "keys", datatype=XSD.string
+            )
+        }
+    ):
+        src.setdefault(i.key_base, {})
+        src[i.key_name] = i.key_value
+
+    src_hash = getattr(hashes, src[0]["hash_algorithm"])()
+    for k in src.values():
+        try:
+            partner_key = load_pem_public_key(
+                k["key"], None, defbackend
+            )
+        except ValueError:
+            try:
+                partner_key = load_der_public_key(
+                    k["key"], None, defbackend
+                )
+            except ValueError:
+                raise
+
+        enc = partner_key.encrypt(
+            aes_key,
+            padding.OAEP(
+                mgf=padding.MGF1(algorithm=src_hash),
+                algorithm=src_hash,
+                label=None
+            )
+        )
+        partner_pem_public = partner_key.public_key().public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo
+        )
+        digest = hashes.Hash(src_hash, backend=default_backend())
+        digest.update(partner_pem_public)
+        partner_keyhash = digest.finalize().hex()
+        src_key_list[partner_keyhash] = base64.urlsafe_b64encode(enc)
+
+    updater = hashes.Hash(
+        dest_info["hash_algorithm"], backend=defbackend
+    )
+    for mh in sorted(dest_info["keys"].keys()):
+        updater.update(mh.encode("ascii", "ignore"))
+
+    dest_activator_value = updater.finalize()
+    errored = []
+    dest_hash = getattr(hashes, dest_info["hash_algorithm"])()
+
+    for h, val in dest_info["keys"].items():
+        try:
+            dest_key = load_pem_public_key(
+                val["key"], None, defbackend
+            )
+        except ValueError:
+            try:
+                dest_key = load_der_public_key(
+                    val["key"], None, defbackend
+                )
+            except ValueError:
+                raise
+        try:
+            dest_key.verify(
+                val["signature"],
+                dest_activator_value,
+                padding.PSS(
+                    mgf=padding.MGF1(dest_hash),
+                    salt_length=padding.PSS.MAX_LENGTH
+                ),
+                dest_hash
+            )
+        except InvalidSignature:
+            errored.append(h)
+            continue
+        enc = dest_key.encrypt(
+            aes_key,
+            padding.OAEP(
+                mgf=padding.MGF1(algorithm=argv.hash),
+                algorithm=argv.hash,
+                label=None
+            )
+        )
+        dest_key_list[h] = base64.urlsafe_b64encode(enc)
+    if errored:
+        argv.exit(1, "Key validation failed")
+    ctx = AESGCM(aes_key)
+    blob = ctx.encrypt(
+        nonce, b"Type: message\n\n%b" % (
+            blob
+        )
+    )
+    # create message object
+    response = s.post(
+        url_create, body={
+            "own_hash": pkey_hash,
+            "key_list": src_key_list,
+            "encrypted_content": io.BytesIO(
+                b"%b\0%b" % (nonce, blob)
+            )
+        }
+    )
+    response_dest = s.post(
+        dest_create, body={
+            "": None,
+            "key_list": dest_key_list
+        }
+    )
+
+
+def action_view(argv, access, pkey, pkey_hash, s, response):
+    if access == "ref":
+        key_list = json.loads(response.headers["X-KEYLIST"])
+        key = key_list.get("keyhash", None)
+        if not key:
+            argv.exit(0, "message not for me")
+        decrypted_key = pkey.decrypt(
+            key,
+            padding.OAEP(
+                mgf=padding.MGF1(algorithm=argv.hash),
+                algorithm=argv.hash,
+                label=None
+            )
+        )
+        ctx = AESGCM(decrypted_key)
+        nonce, content = response.content.split(b"\0", 1)
+        blob = ctx.decrypt(nonce, content)
+        headers, content = blob.split(b"\n\n", 1)
+        print(content)
+    else:
+        g = Graph()
+        g.parse(data=response.content, format="turtle")
+        q = list(g.query(
+            """
+                SELECT DISTINCT ?base, ?name, ?value
+                WHERE {
+                    ?a spkc:name ?message_list .
+                    ?a spkc:value ?base .
+                    ?base spkc:name ?name .
+                    ?base spkc:value ?value .
+                }
+            """,
+            initNs={"spkc": spkcgraph},
+            initBindings={
+                "message_list": Literal(
+                    "message_list", datatype=XSD.string
+                )
+            }
+        ))
+        if len(q) == 0:
+            argv.exit(1, "postbox not found")
+        q2 = {}
+        for i in q:
+            q2.setdefault(i.base, {})
+            q2[i.base][i.name] = i.value
+        print("Messages:")
+        for i in q2:
+            print(i["id"], i["sender"])
+        # view
+
+
+def action_check(argv, access, pkey, pkey_hash, s, response, verb=True):
+    src = {}
+    src_key_list = {}
+    defbackend = default_backend()
+
+    g = Graph()
+    g.parse(data=response.content, format="turtle")
+
+    for i in g.query(
+        """
+            SELECT DISTINCT ?key_base, ?key_name, ?key_value
+            WHERE {
+                ?base spkc:name ?keys_name .
+                ?base spkc:value ?keybase .
+                ?key_base spkc:properties ?key_base_prop .
+                ?key_base_prop spkc:name ?key_name .
+                ?key_base_prop spkc:value ?key_value .
+            }
+        """,
+        initNs={"spkc": spkcgraph},
+        initBindings={
+            "keys_name": Literal(
+                "keys", datatype=XSD.string
+            )
+        }
+    ):
+        src.setdefault(i.key_base, {})
+        src[i.key_name] = i.key_value
+
+    src_hash = getattr(hashes, src[0]["hash_algorithm"])()
+    for k in src.values():
+        try:
+            partner_key = load_pem_public_key(
+                k["key"], None, defbackend
+            )
+        except ValueError:
+            try:
+                partner_key = load_der_public_key(
+                    k["key"], None, defbackend
+                )
+            except ValueError:
+                raise
+
+        partner_pem_public = partner_key.public_key().public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo
+        )
+        digest = hashes.Hash(src_hash, backend=default_backend())
+        digest.update(partner_pem_public)
+        partner_keyhash = digest.finalize().hex()
+        src_key_list[partner_keyhash] = partner_key
+
+    updater = hashes.Hash(
+        src_hash, backend=defbackend
+    )
+    for mh in sorted(src_key_list.keys()):
+        updater.update(mh.encode("ascii", "ignore"))
+
+    src_activator_value = updater.finalize()
+    tmp = list(g.query(
+        """
+            SELECT
+            DISTINCT ?name, ?value
+            WHERE {
+                ?base spkc:name ?name .
+                ?base spkc:value ?value .
+            }
+        """,
+        initNs={"spkc": spkcgraph},
+        initBindings={
+            "name": Literal(
+                "key_activator", datatype=XSD.string
+            ),
+
+        }
+    ))
+    if tmp[0] != src_activator_value:
+        return "activator doesn't match shown activator"
+
+    errored = []
+
+    for h, val in src.items():
+        key = src_key_list[h]
+        try:
+            key.verify(
+                val["signature"],
+                src_activator_value,
+                padding.PSS(
+                    mgf=padding.MGF1(src_hash),
+                    salt_length=padding.PSS.MAX_LENGTH
+                ),
+                src_hash
+            )
+        except InvalidSignature:
+            errored.append(h)
+            continue
+    if errored:
+        return ", ".join(errored)
+    return True
+
+
 def main(argv):
     argv = parser.parse_args(argv)
     if not os.path.exists(argv.key):
@@ -107,12 +420,17 @@ def main(argv):
     if not match:
         argv.exit(1, "invalid url")
     if argv.verbose >= 2:
-        logging.setLevel(logging.DEBUG)
+        logger.setLevel(logging.DEBUG)
     elif argv.verbose >= 1:
-        logging.setLevel(logging.INFO)
+        logger.setLevel(logging.INFO)
     else:
-        logging.setLevel(logging.WARNING)
+        logger.setLevel(logging.WARNING)
     access = match.groupdict()["access"]
+    if (
+        argv.action == "check" and
+        access not in {"view", "list"}
+    ):
+        argv.exit(1, "url doesn't match action")
     if (
         argv.action in {"view", "peek"} and
         access not in {"view", "ref", "list"}
@@ -143,26 +461,13 @@ def main(argv):
             encoding=serialization.Encoding.PEM,
             format=serialization.PublicFormat.SubjectPublicKeyInfo
         )
-        digest = hashes.Hash(argv.hash, backend=default_backend())
-        digest.update(pem_public)
-        keyhash = digest.finalize().hex()
 
     with requests.Session() as s:
         if access == "list":
             response = s.get(
                 merge_get_url(
                     argv.url, raw="embed", info="_type=PostBox"
-                ),
-                body={
-                    "keyhash": keyhash
-                }
-            )
-        elif argv.action == "view":
-            response = s.post(
-                merge_get_url(argv.url, raw="embed"),
-                body={
-                    "keyhash": keyhash
-                }
+                )
             )
         else:
             response = s.get(
@@ -172,222 +477,54 @@ def main(argv):
             logging.info("Url returned error: %s", response.text)
             argv.exit(1, "url invalid")
 
-        if argv.action == "send":
-            url = merge_get_url(argv.url, raw="true")
-            g = Graph()
-            g.parse(data=response.content, format="turtle")
-            if (
-                None, spkcgraph["create:name"], Literal(
-                    "MessageContent", datatype=XSD.string
-                )
-            ) not in g:
-                argv.exit(1, "Source does not support action")
-            response_dest = s.get(
-                merge_get_url(argv.dest, raw="embed")
-            )
-            if not response_dest.ok:
-                logging.info("Dest returned error: %s", response_dest.text)
-                argv.exit(1, "url invalid")
-            g_dest = Graph()
-            g_dest.parse(data=response.content, format="turtle")
-            dest_create = g_dest.value(
-                predicate=spkcgraph["spkc:feature:name"],
-                object=Literal(
-                    "webrefpush", datatype=XSD.string
-                )
-            )
-            dest_info = s.get(dest_create).json
-            url_create = replace_action(url, "add/MessageContent/")
-            response = s.get(url_create)
-            if not response.ok:
-                logging.error("Creation failed: %s", response.text)
-                argv.exit(1, "Creation failed: %s" % response.text)
-            g = Graph()
-            g.parse(data=response.content, format="html")
-            if (
-                None, spkcgraph["spkc:csrftoken"], None
-            ) not in g_dest:
-                logging.error("failure: no csrftoken: %s", response.text)
-                argv.exit(1, "failure: no csrftoken")
-            blob = sys.stdin.read()
-            aes_key = AESGCM.generate_key(bit_length=256)
-            nonce = os.urandom(20)
-            src = {}
-            src_key_list = {}
-            dest_key_list = {}
-            defbackend = default_backend()
+        g = Graph()
+        g.parse(data=response.content, format="turtle")
+        src = {}
 
-            for i in g.query(
-                """
-                    SELECT DISTINCT ?key_base, ?key_name, ?key_value
-                    WHERE {
-                        ?base spkc:name ?keys_name .
-                        ?base spkc:value ?keybase .
-                        ?key_base spkc:properties ?key_base_prop .
-                        ?key_base_prop spkc:name ?key_name .
-                        ?key_base_prop spkc:value ?key_value .
-                    }
-                """,
-                initNs={"spkc": spkcgraph},
-                initBindings={
-                    "keys_name": Literal(
-                        "keys", datatype=XSD.string
-                    )
+        for i in g.query(
+            """
+                SELECT DISTINCT ?key_base ?key_name ?key_value
+                WHERE {
+                    ?base spkc:name ?keys_name .
+                    ?base spkc:value ?keybase .
+                    ?key_base spkc:properties ?key_base_prop .
+                    ?key_base_prop spkc:name ?key_name .
+                    ?key_base_prop spkc:value ?key_value .
                 }
-            ):
-                src.setdefault(i.key_base, {})
-                src[i.key_name] = i.key_value
-
-            src_hash = getattr(hashes, src[0]["hash_algorithm"])()
-            for k in src.values():
-                try:
-                    partner_key = load_pem_public_key(
-                        k["key"], None, defbackend
-                    )
-                except ValueError:
-                    try:
-                        partner_key = load_der_public_key(
-                            k["key"], None, defbackend
-                        )
-                    except ValueError:
-                        raise
-
-                enc = partner_key.encrypt(
-                    aes_key,
-                    padding.OAEP(
-                        mgf=padding.MGF1(algorithm=src_hash),
-                        algorithm=src_hash,
-                        label=None
-                    )
+            """,
+            initNs={"spkc": spkcgraph},
+            initBindings={
+                "keys_name": Literal(
+                    "keys", datatype=XSD.string
                 )
-                partner_pem_public = partner_key.public_key().public_bytes(
-                    encoding=serialization.Encoding.PEM,
-                    format=serialization.PublicFormat.SubjectPublicKeyInfo
-                )
-                digest = hashes.Hash(src_hash, backend=default_backend())
-                digest.update(partner_pem_public)
-                partner_keyhash = digest.finalize().hex()
-                src_key_list[partner_keyhash] = base64.urlsafe_b64encode(enc)
+            }
+        ):
+            src.setdefault(i.key_base, {})
+            src[i.key_name] = i.key_value
 
-            updater = hashes.Hash(
-                dest_info["hash_algorithm"], backend=defbackend
-            )
-            for mh in sorted(dest_info["keys"].keys()):
-                updater.update(mh.encode("ascii", "ignore"))
+        src_hash = getattr(hashes, src[0]["hash_algorithm"])()
 
-            dest_activator_value = updater.finalize()
-            errored = []
-            dest_hash = getattr(hashes, dest_info["hash_algorithm"])()
+        digest = hashes.Hash(src_hash, backend=default_backend())
+        digest.update(pem_public)
+        pkey_hash = digest.finalize().hex()
 
-            for h, val in dest_info["keys"].items():
-                try:
-                    dest_key = load_pem_public_key(
-                        val["key"], None, defbackend
-                    )
-                except ValueError:
-                    try:
-                        dest_key = load_der_public_key(
-                            val["key"], None, defbackend
-                        )
-                    except ValueError:
-                        raise
-                try:
-                    dest_key.verify(
-                        val["signature"],
-                        dest_activator_value,
-                        padding.PSS(
-                            mgf=padding.MGF1(dest_hash),
-                            salt_length=padding.PSS.MAX_LENGTH
-                        ),
-                        dest_hash
-                    )
-                except InvalidSignature:
-                    errored.append(h)
-                    continue
-                enc = dest_key.encrypt(
-                    aes_key,
-                    padding.OAEP(
-                        mgf=padding.MGF1(algorithm=argv.hash),
-                        algorithm=argv.hash,
-                        label=None
-                    )
-                )
-                dest_key_list[h] = base64.urlsafe_b64encode(enc)
-            if errored:
-                argv.exit(1, "Key validation failed")
-            ctx = AESGCM(aes_key)
-            blob = ctx.encrypt(
-                nonce, b"Type: message\n\n%b" % (
-                    blob
-                )
-            )
-            # create message object
+        if argv.action == "view":
             response = s.post(
-                url_create, body={
-                    "own_hash": keyhash,
-                    "key_list": src_key_list,
-                    "encrypted_content": io.BytesIO(
-                        b"%b\0%b" % (nonce, blob)
-                    )
-                }
-            )
-            response_dest = s.post(
-                dest_create, body={
-                    "": None,
-                    "key_list": dest_key_list
+                merge_get_url(argv.url, raw="embed"),
+                body={
+                    "keyhash": pkey_hash
                 }
             )
 
+        if argv.action == "send":
+            return action_send(argv, access, pkey, pkey_hash, s, response)
         elif argv.action in {"view", "peek"}:
-            if access == "ref":
-                key_list = json.loads(response.headers["X-KEYLIST"])
-                key = key_list.get("keyhash", None)
-                if not key:
-                    argv.exit(0, "message not for me")
-                decrypted_key = pkey.decrypt(
-                    key,
-                    padding.OAEP(
-                        mgf=padding.MGF1(algorithm=argv.hash),
-                        algorithm=argv.hash,
-                        label=None
-                    )
-                )
-                ctx = AESGCM(decrypted_key)
-                nonce, content = response.content.split(b"\0", 1)
-                blob = ctx.decrypt(nonce, content)
-                headers, content = blob.split(b"\n\n", 1)
-                print(content)
-            else:
-                q = list(g.query(
-                    """
-                        SELECT DISTINCT ?base, ?name, ?value
-                        WHERE {
-                            ?a spkc:name ?message_list .
-                            ?a spkc:value ?base .
-                            ?base spkc:name ?name .
-                            ?base spkc:value ?value .
-                        }
-                    """,
-                    initNs={"spkc": spkcgraph},
-                    initBindings={
-                        "message_list": Literal(
-                            "message_list", datatype=XSD.string
-                        )
-                    }
-                ))
-                if len(q) == 0:
-                    argv.exit(1, "postbox not found")
-                q2 = {}
-                for i in q:
-                    q2.setdefault(i.base, {})
-                    q2[i.base][i.name] = i.value
-                print("Messages:")
-                for i in q2:
-                    print(i["id"], i["sender"])
-                # view
+            return action_view(argv, access, pkey, pkey_hash, s, response)
         elif argv.action == "check":
-            pass
+            ret = action_check(argv, access, pkey, pkey_hash, s, response)
+            if ret is not True:
+                argv.exit(2, "check failed: %s" % ret)
 
 
 if __name__ == "__main__":
-    main(sys.argv)
+    main(sys.argv[1:])
