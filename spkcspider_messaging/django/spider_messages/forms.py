@@ -107,6 +107,7 @@ class PostBoxForm(forms.ModelForm):
 
     def __init__(self, scope, **kwargs):
         super().__init__(**kwargs)
+        self.initial["hash_algorithm"] = self.fields["hash_algorithm"].initial
         if scope in {"view", "raw"}:
             self.fields["message_list"].initial = [
                 {
