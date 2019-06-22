@@ -14,7 +14,7 @@ from spkcspider_messaging.constants import ReferenceType
 from spkcspider.apps.spider.conf import get_anchor_domain, get_anchor_scheme
 from spkcspider.apps.spider.helpers import get_hashob
 from spkcspider.apps.spider.fields import JsonField
-from .widgets import SignatureWidget
+from .widgets import SignatureWidget, MessageListWidget
 
 from .models import WebReference, PostBox, MessageContent
 
@@ -56,9 +56,14 @@ class ReferenceForm(forms.ModelForm):
 
 class PostBoxForm(forms.ModelForm):
     message_list = forms.CharField(
-        widget=forms.HiddenInput(), disabled=True
+        widget=MessageListWidget(), disabled=True
     )
     setattr(message_list, "hashable", False)
+    setattr(
+        message_list,
+        "view_form_field_template",
+        "spider_messages/partials/fields/view_message_list.html"
+    )
     combined_keyhash = forms.CharField(
         label=_("Key activation hash"), help_text=_(
             "Re-sign with every active key for activating new key "
@@ -97,16 +102,21 @@ class PostBoxForm(forms.ModelForm):
     def __init__(self, scope, **kwargs):
         super().__init__(**kwargs)
         if scope in {"view", "raw"}:
-            self.fields["message_list"].initial = \
-                json.dumps({
-                    "messages": [
-                        {
-                            "id": i.id,
-                            "size": i.cached_size,
-                            "sender": i.url.split("?", 1)[0]
-                        } for i in self.instance.references.all()
-                    ]
-                })
+            self.fields["message_list"].initial = [
+                {
+                    "id": i.id,
+                    "size": i.cached_size,
+                    "sender": i.url.split("?", 1)[0]
+                } for i in self.instance.references.all()
+            ]
+        elif scope == "export":
+            self.fields["message_list"].initial = [
+                {
+                    "key_list": i.key_list,
+                    "rtype": i.rtype,
+                    "url": i.url
+                } for i in self.instance.references.all()
+            ]
         else:
             del self.fields["message_list"]
 

@@ -1,4 +1,4 @@
-__all__ = ["SignatureWidget"]
+__all__ = ["SignatureWidget", "MessageListWidget"]
 
 import json
 
@@ -62,3 +62,11 @@ class SignatureWidget(widgets.Textarea):
             value = json.dumps(value, ensure_ascii=False, indent=2)
 
         return super().render(name, value, attrs, renderer)
+
+
+class MessageListWidget(widgets.Widget):
+    template_name = "spider_messages/forms/widgets/message_list_widget.html"
+    input_type = None
+
+    def format_value(self, value):
+        return value

@@ -1,0 +1,17 @@
+{% load spider_rdf %}
+<data {% include "django/forms/widgets/attrs.html" %} hidden="hidden">
+  {% for message in widget.value %}
+    <data hidden="hidden" typeof="spkc:Entity">
+      <data hidden="hidden" rel="spkc:properties">
+        {% for d in message.items %}
+          {% literalize d.1 as LiteralData %}
+          <data hidden="hidden" typeof="spkc:Property">
+            <data hidden="hidden" property="spkc:name" datatype="xsd:string">{{d.0}}</data>
+            <data hidden="hidden" property="spkc:hashable" datatype="xsd:boolean">false</data>
+            <data hidden="hidden" property="spkc:value" datatype="{{LiteralData.datatype}}">{{LiteralData.value}}</data>
+          </data>
+        {% endfor %}
+      </data>
+    </data>
+  {% endfor %}
+</data>

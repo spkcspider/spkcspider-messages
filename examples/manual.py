@@ -214,44 +214,52 @@ def main(argv):
             src_key_list = {}
             dest_key_list = {}
             defbackend = default_backend()
-            for i in g.query(
+            for key in g.query(
                 """
                     SELECT DISTINCT ?key_value
                     WHERE {
                         ?base spkc:name ?keys_name .
-                        ?base spkc:value ?key .
+                        ?base spkc:value ?keybase .
+                        ?key_base spkc:properties ?key_base_prop .
+                        ?key_base_prop spkc:name ?key_name .
+                        ?key_base_prop spkc:value ?key_value .
                     }
                 """,
                 initNs={"spkc": spkcgraph},
                 initBindings={
+                    "key_name": Literal(
+                        "key", datatype=XSD.string
+                    ),
                     "keys_name": Literal(
                         "keys", datatype=XSD.string
                     )
                 }
             ):
-            breakpoint()
-            for i in g:
-                postbox_base = g.value()
-
-            # for i in g.objects(
-            #
-            # ):
-            #    try:
-            #        pkey = load_pem_public_key(i[1], None, defbackend)
-            #    except ValueError:
-            #        try:
-            #            pkey = load_der_public_key(i[1], None, defbackend)
-            #        except ValueError:
-            #            raise
-            #    enc = pkey.encrypt(
-            #        aes_key,
-            #        padding.OAEP(
-            #            mgf=padding.MGF1(algorithm=argv.hash),
-            #            algorithm=argv.hash,
-            #            label=None
-            #        )
-            #    )
-            #    dest_key_list[i[0]] = base64.urlsafe_b64encode(enc)
+                try:
+                    partner_key = load_pem_public_key(key, None, defbackend)
+                except ValueError:
+                    try:
+                        partner_key = load_der_public_key(
+                            key, None, defbackend
+                        )
+                    except ValueError:
+                        raise
+                enc = pkey.encrypt(
+                    aes_key,
+                    padding.OAEP(
+                        mgf=padding.MGF1(algorithm=argv.hash),
+                        algorithm=argv.hash,
+                        label=None
+                    )
+                )
+                partner_pem_public = partner_key.public_key().public_bytes(
+                    encoding=serialization.Encoding.PEM,
+                    format=serialization.PublicFormat.SubjectPublicKeyInfo
+                )
+                digest = hashes.Hash(argv.hash, backend=default_backend())
+                digest.update(partner_pem_public)
+                partner_keyhash = digest.finalize().hex()
+                src_key_list[partner_keyhash] = base64.urlsafe_b64encode(enc)
 
             for i in dest_info["keys"].items():
                 try:
@@ -315,10 +323,12 @@ def main(argv):
             else:
                 q = list(g.query(
                     """
-                        SELECT DISTINCT ?value
+                        SELECT DISTINCT ?base, ?name, ?value
                         WHERE {
                             ?a spkc:name ?message_list .
-                            ?a spkc:value ?value .
+                            ?a spkc:value ?base .
+                            ?base spkc:name ?name .
+                            ?base spkc:value ?value .
                         }
                     """,
                     initNs={"spkc": spkcgraph},
@@ -330,9 +340,12 @@ def main(argv):
                 ))
                 if len(q) == 0:
                     argv.exit(1, "postbox not found")
-                q = json.loads(q[0])
-                print("Messages:")
+                q2 = {}
                 for i in q:
+                    q2.setdefault(i.base, {})
+                    q2[i.base][i.name] = i.value
+                print("Messages:")
+                for i in q2:
                     print(i["id"], i["sender"])
                 # view
         elif argv.action == "fix":

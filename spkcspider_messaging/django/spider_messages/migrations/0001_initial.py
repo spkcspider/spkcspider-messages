@@ -11,7 +11,7 @@ class Migration(migrations.Migration):
     initial = True
 
     dependencies = [
-        ('spider_keys', '0003_auto_20190621_0813'),
+        ('spider_keys', '0002_20190426_squashed'),
     ]
 
     operations = [

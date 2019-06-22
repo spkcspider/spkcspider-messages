@@ -22,6 +22,7 @@ from django.test import Client
 
 from jsonfield import JSONField
 
+from rdflib import Literal, BNode, XSD
 import requests
 
 from spkcspider.apps.spider.helpers import (
@@ -29,7 +30,8 @@ from spkcspider.apps.spider.helpers import (
 )
 from spkcspider.apps.spider.contents import BaseContent, add_content
 from spkcspider.apps.spider.conf import TOKEN_SIZE
-from spkcspider.apps.spider.constants import VariantType, ActionUrl
+from spkcspider.apps.spider.templatetags.spider_rdf import literalize
+from spkcspider.apps.spider.constants import VariantType, ActionUrl, spkcgraph
 
 from spkcspider_messaging.constants import ReferenceType
 
@@ -112,8 +114,32 @@ class PostBox(BaseContent):
     )
 
     def map_data(self, name, field, data, graph, context):
-        if name == "references":
-            raise NotImplementedError()
+        if name == "message_list":
+            ret = BNode()
+            for nname, val in data.items():
+                value_node = BNode()
+
+                graph.add((
+                    ret,
+                    spkcgraph["properties"],
+                    value_node
+                ))
+                graph.add((
+                    value_node,
+                    spkcgraph["hashable"],
+                    Literal(False)
+                ))
+                graph.add((
+                    value_node,
+                    spkcgraph["name"],
+                    Literal(nname, datatype=XSD.string)
+                ))
+                graph.add((
+                    value_node,
+                    spkcgraph["value"],
+                    literalize(val)
+                ))
+            return ret
         return super().map_data(name, field, data, graph, context)
 
     @classmethod
