@@ -28,10 +28,12 @@ class SignatureWidget(widgets.Textarea):
             attrs = {"class": ""}
         if not wrapper_attrs:
             wrapper_attrs = {}
+        wrapper_attrs.setdefault("style", "")
         attrs.setdefault("class", "")
         attrs["class"] += " SignatureEditorTarget"
         # don't access them as they are lazy evaluated
         attrs["item_label"] = item_label
+        wrapper_attrs["style"] += " width:100%"
         self.wrapper_attrs = wrapper_attrs.copy()
         super().__init__(attrs=attrs, **kwargs)
 
@@ -52,16 +54,11 @@ class SignatureWidget(widgets.Textarea):
         if not value:
             return "[]"
         if isinstance(value, (tuple, list)):
-            value = json.dumps(value)
+            value = json.dumps(list(map(
+                lambda x: {"hash": x["hash"], "signature": x["signature"]},
+                value
+            )))
         return str(value)
-
-    def render(self, name, value, attrs=None, renderer=None):
-        if value is None:
-            value = ""
-        if not isinstance(value, str):
-            value = json.dumps(value, ensure_ascii=False, indent=2)
-
-        return super().render(name, value, attrs, renderer)
 
 
 class MessageListWidget(widgets.Widget):

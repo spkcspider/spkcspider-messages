@@ -1,5 +1,6 @@
 __all__ = ["ReferenceForm", "PostBoxForm", "MessageForm"]
 
+import base64
 import re
 import json
 from urllib.parse import urljoin
@@ -55,7 +56,7 @@ class ReferenceForm(forms.ModelForm):
 
 
 class PostBoxForm(forms.ModelForm):
-    message_list = forms.CharField(
+    message_list = JsonField(
         widget=MessageListWidget(), disabled=True
     )
     setattr(message_list, "hashable", False)
@@ -64,15 +65,15 @@ class PostBoxForm(forms.ModelForm):
         "view_form_field_template",
         "spider_messages/partials/fields/view_message_list.html"
     )
-    combined_keyhash = forms.CharField(
-        label=_("Key activation hash"), help_text=_(
+    key_activator = forms.CharField(
+        label=_("Key activator"), help_text=_(
             "Re-sign with every active key for activating new key "
             "or removing a key"
         )
     )
-    setattr(combined_keyhash, "hashable", True)
+    setattr(key_activator, "hashable", True)
     setattr(
-        combined_keyhash,
+        key_activator,
         "view_form_field_template",
         "spider_messages/partials/fields/view_combined_keyhash.html"
     )
@@ -99,6 +100,11 @@ class PostBoxForm(forms.ModelForm):
         model = PostBox
         fields = ["only_persistent", "shared", "keys"]
 
+    field_order = [
+        "only_persistent", "shared", "keys", "key_activator",
+        "message_list", "signatures"
+    ]
+
     def __init__(self, scope, **kwargs):
         super().__init__(**kwargs)
         if scope in {"view", "raw"}:
@@ -109,6 +115,7 @@ class PostBoxForm(forms.ModelForm):
                     "sender": i.url.split("?", 1)[0]
                 } for i in self.instance.references.all()
             ]
+            self.initial["message_list"] = self.fields["message_list"].initial
         elif scope == "export":
             self.fields["message_list"].initial = [
                 {
@@ -117,13 +124,17 @@ class PostBoxForm(forms.ModelForm):
                     "url": i.url
                 } for i in self.instance.references.all()
             ]
+            self.initial["message_list"] = self.fields["message_list"].initial
         else:
             del self.fields["message_list"]
 
-        self.fields["keys"].queryset = \
-            self.fields["keys"].queryset.filter(
-                associated_rel__info__contains="\x1epubkeyhash="
-            )
+        if scope in {"add", "update", "export"}:
+            self.fields["keys"].queryset = \
+                self.fields["keys"].queryset.filter(
+                    associated_rel__info__contains="\x1epubkeyhash="
+                )
+        else:
+            del self.fields["keys"]
         if self.instance.id and self.instance.keys.exists():
             mapped_hashes = map(
                 lambda x: self.extract_pupkeyhash.search(x).group(1),
@@ -135,9 +146,13 @@ class PostBoxForm(forms.ModelForm):
             ho = get_hashob()
             for mh in mapped_hashes:
                 ho.update(mh.encode("ascii", "ignore"))
-            self.fields["combined_keyhash"].initial = ho.finalize().hex()
+            self.fields["key_activator"].initial = \
+                base64.urlsafe_b64encode(ho.finalize()).decode("ascii")
+            self.initial["key_activator"] = \
+                self.fields["key_activator"].initial
             self.fields["signatures"].initial = [
                 {
+                    "key": x.key,
                     "hash": x.key.associated.getlist("hash", 1)[0].split(
                         "=", 1
                     )[-1],
@@ -145,18 +160,33 @@ class PostBoxForm(forms.ModelForm):
                 } for x in self.instance.key_infos.all()
             ]
         else:
-            del self.fields["combined_keyhash"]
+            del self.fields["key_activator"]
             del self.fields["signatures"]
 
     def clean_signatures(self):
         ret = self.cleaned_data["signatures"]
         if len(ret) == 0:
-            raise forms.ValidationError()
+            raise forms.ValidationError(
+                _("Requires keys")
+            )
         try:
-            ret[0]["hash"] and ret[0]["signature"]
+            for i in ret:
+                i["hash"] and i["signature"]
         except KeyError:
-            raise forms.ValidationError()
+            raise forms.ValidationError(
+                _("invalid signature format")
+            )
         return ret
+
+    def _save_m2m(self):
+        super()._save_m2m()
+        for sig in self.cleaned_data.get("signatures", []):
+            signature = sig.get("signature")
+            if signature:
+                self.instance.key_infos.filter(
+                    key__associated_rel__info__contains="\x1ehash=%s=%s" %
+                    (settings.SPIDER_HASH_ALGORITHM.name, sig["hash"])
+                ).update(signature=signature)
 
 
 class MessageForm(forms.ModelForm):

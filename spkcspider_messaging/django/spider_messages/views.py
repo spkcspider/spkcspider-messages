@@ -1,5 +1,7 @@
 __all__ = ("ReferenceView", "MessageContentView")
 
+import re
+
 from django.conf import settings
 from django.http import Http404, JsonResponse, HttpResponse
 from django.shortcuts import get_object_or_404
@@ -23,6 +25,7 @@ _empty_set = frozenset()
 class ReferenceView(UserTestMixin, View):
     model = WebReference
     form_class = ReferenceForm
+    extract_pupkeyhash = re.compile("\x1epubkeyhash=([^\x1e]+)")
 
     @method_decorator(csrf_exempt)
     def dispatch(self, request, *args, **kwargs):
@@ -66,8 +69,16 @@ class ReferenceView(UserTestMixin, View):
             {
                 "hash_algorithm": settings.SPIDER_HASH_ALGORITHM.name,
                 "keys": {
-                    (k.associated.getlist("pubkeyhash", 1)[0], k.key)
-                    for k in self.object.keys.prefetch(
+                    (
+                        self.extract_pupkeyhash.search(
+                            k.key.associated.info
+                        ).group(1),
+                        {
+                            "key": k.key.key,
+                            "signature": k.signature
+                        }
+                    )
+                    for k in self.object.key_infos.prefetch(
                         "associated_rel"
                     ).all()
                 }

@@ -27,11 +27,11 @@ parser.add_argument(
     default="key.priv", help='Private Key'
 )
 parser.add_argument(
-    'sign', help='Message to sign'
-)
-parser.add_argument(
     '--verbose', "-v", action='count', default=0,
     help='Verbosity'
+)
+parser.add_argument(
+    'sign', help='Message to sign', nargs="+"
 )
 
 
@@ -68,7 +68,7 @@ def load_priv_key(data):
 
 
 def main(argv):
-    argv = parser.parse_args(argv)
+    argv = parser.parse_args(argv[1:])
     argv.hash = getattr(hashes, argv.hash)()
     if not os.path.exists(argv.key):
         argv.exit(1, "key does not exist")
@@ -83,18 +83,21 @@ def main(argv):
 
         if not pkey:
             argv.exit(1, "invalid key: %s" % argv.key)
-    signature = pkey.sign(
-        argv.sign.encode("utf-8", errors="ignore"),
-        padding.PSS(
-            mgf=padding.MGF1(argv.hash),
-            salt_length=padding.PSS.MAX_LENGTH
-        ),
-        argv.hash
-    )
-    print(
-        argv.hash.name, base64.urlsafe_b64encode(signature).decode("ascii"),
-        sep="="
-    )
+    for tosign in argv.sign:
+        signature = pkey.sign(
+            base64.urlsafe_b64decode(tosign),
+            padding.PSS(
+                mgf=padding.MGF1(argv.hash),
+                salt_length=padding.PSS.MAX_LENGTH
+            ),
+            argv.hash
+        )
+        print("Signature:")
+        print(
+            argv.hash.name,
+            base64.urlsafe_b64encode(signature).decode("ascii"),
+            sep="="
+        )
 
 
 if __name__ == "__main__":

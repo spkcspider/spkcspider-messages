@@ -24,6 +24,9 @@ document.addEventListener("DOMContentLoaded", function(){
         "type": "array",
         "options": {
           "compact": true,
+          "inputAttributes": {
+            "style": "width:100%"
+          }
         },
         "format": "table",
         "items": {
@@ -32,10 +35,21 @@ document.addEventListener("DOMContentLoaded", function(){
           "properties": {
             "hash": {
               "type": "string",
-              "readonly": true
+              "readonly": true,
+              "options": {
+                "inputAttributes": {
+                  "form": "dump_form"
+                }
+              }
             },
             "signature": {
-              "type": "string"
+              "type": "string",
+              "options": {
+                "inputAttributes": {
+
+                  "form": "_dump_form"
+                }
+              }
             }
           }
         }
@@ -47,7 +61,7 @@ document.addEventListener("DOMContentLoaded", function(){
       if (errors.length){
         ev.preventDefault();
       } else {
-        element.value = editor.getValue();
+        element.value = JSON.stringify(editor.getValue());
       }
     };
     element.form.addEventListener("submit", handler, false);

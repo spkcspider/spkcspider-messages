@@ -22,11 +22,11 @@ from django.test import Client
 
 from jsonfield import JSONField
 
-from rdflib import Literal, BNode, XSD
+from rdflib import Literal, BNode
 import requests
 
 from spkcspider.apps.spider.helpers import (
-    merge_get_url, get_requests_params, create_b64_token
+    merge_get_url, get_requests_params, create_b64_token, add_property
 )
 from spkcspider.apps.spider.contents import BaseContent, add_content
 from spkcspider.apps.spider.conf import TOKEN_SIZE
@@ -115,30 +115,35 @@ class PostBox(BaseContent):
 
     def map_data(self, name, field, data, graph, context):
         if name == "message_list":
+            if data is None:
+                return literalize(data)
             ret = BNode()
             for nname, val in data.items():
-                value_node = BNode()
+                value_node = add_property(
+                    graph, nname, ref=ret,
+                    literal=literalize(val)
+                )
 
-                graph.add((
-                    ret,
-                    spkcgraph["properties"],
-                    value_node
-                ))
                 graph.add((
                     value_node,
                     spkcgraph["hashable"],
                     Literal(False)
                 ))
-                graph.add((
-                    value_node,
-                    spkcgraph["name"],
-                    Literal(nname, datatype=XSD.string)
-                ))
-                graph.add((
-                    value_node,
-                    spkcgraph["value"],
-                    literalize(val)
-                ))
+            return ret
+        elif name == "signatures":
+            if data is None:
+                return literalize(data)
+            ret = literalize(data["key"])
+            value_node = add_property(
+                graph, "signature", ref=ret,
+                literal=literalize(data["signature"])
+            )
+
+            graph.add((
+                value_node,
+                spkcgraph["hashable"],
+                Literal(False)
+            ))
             return ret
         return super().map_data(name, field, data, graph, context)
 

@@ -10,6 +10,7 @@ import json
 
 import requests
 # from cryptography.x509.oid import NameOID
+from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes, padding, serialization
@@ -48,7 +49,7 @@ parser.add_argument(
 subparsers = parser.add_subparsers(dest='action')
 subparsers.add_parser("view")
 subparsers.add_parser("peek")
-subparsers.add_parser("fix")
+subparsers.add_parser("check")
 send_parser = subparsers.add_parser("send")
 send_parser.add_argument(
     'dest', action="store", required=True,
@@ -211,12 +212,14 @@ def main(argv):
             blob = sys.stdin.read()
             aes_key = AESGCM.generate_key(bit_length=256)
             nonce = os.urandom(20)
+            src = {}
             src_key_list = {}
             dest_key_list = {}
             defbackend = default_backend()
-            for key in g.query(
+
+            for i in g.query(
                 """
-                    SELECT DISTINCT ?key_value
+                    SELECT DISTINCT ?key_base, ?key_name, ?key_value
                     WHERE {
                         ?base spkc:name ?keys_name .
                         ?base spkc:value ?keybase .
@@ -227,28 +230,33 @@ def main(argv):
                 """,
                 initNs={"spkc": spkcgraph},
                 initBindings={
-                    "key_name": Literal(
-                        "key", datatype=XSD.string
-                    ),
                     "keys_name": Literal(
                         "keys", datatype=XSD.string
                     )
                 }
             ):
+                src.setdefault(i.key_base, {})
+                src[i.key_name] = i.key_value
+
+            src_hash = getattr(hashes, src[0]["hash_algorithm"])()
+            for k in src.values():
                 try:
-                    partner_key = load_pem_public_key(key, None, defbackend)
+                    partner_key = load_pem_public_key(
+                        k["key"], None, defbackend
+                    )
                 except ValueError:
                     try:
                         partner_key = load_der_public_key(
-                            key, None, defbackend
+                            k["key"], None, defbackend
                         )
                     except ValueError:
                         raise
-                enc = pkey.encrypt(
+
+                enc = partner_key.encrypt(
                     aes_key,
                     padding.OAEP(
-                        mgf=padding.MGF1(algorithm=argv.hash),
-                        algorithm=argv.hash,
+                        mgf=padding.MGF1(algorithm=src_hash),
+                        algorithm=src_hash,
                         label=None
                     )
                 )
@@ -256,20 +264,47 @@ def main(argv):
                     encoding=serialization.Encoding.PEM,
                     format=serialization.PublicFormat.SubjectPublicKeyInfo
                 )
-                digest = hashes.Hash(argv.hash, backend=default_backend())
+                digest = hashes.Hash(src_hash, backend=default_backend())
                 digest.update(partner_pem_public)
                 partner_keyhash = digest.finalize().hex()
                 src_key_list[partner_keyhash] = base64.urlsafe_b64encode(enc)
 
-            for i in dest_info["keys"].items():
+            updater = hashes.Hash(
+                dest_info["hash_algorithm"], backend=defbackend
+            )
+            for mh in sorted(dest_info["keys"].keys()):
+                updater.update(mh.encode("ascii", "ignore"))
+
+            dest_activator_value = updater.finalize()
+            errored = []
+            dest_hash = getattr(hashes, dest_info["hash_algorithm"])()
+
+            for h, val in dest_info["keys"].items():
                 try:
-                    pkey = load_pem_public_key(i[1], None, defbackend)
+                    dest_key = load_pem_public_key(
+                        val["key"], None, defbackend
+                    )
                 except ValueError:
                     try:
-                        pkey = load_der_public_key(i[1], None, defbackend)
+                        dest_key = load_der_public_key(
+                            val["key"], None, defbackend
+                        )
                     except ValueError:
                         raise
-                enc = pkey.encrypt(
+                try:
+                    dest_key.verify(
+                        val["signature"],
+                        dest_activator_value,
+                        padding.PSS(
+                            mgf=padding.MGF1(dest_hash),
+                            salt_length=padding.PSS.MAX_LENGTH
+                        ),
+                        dest_hash
+                    )
+                except InvalidSignature:
+                    errored.append(h)
+                    continue
+                enc = dest_key.encrypt(
                     aes_key,
                     padding.OAEP(
                         mgf=padding.MGF1(algorithm=argv.hash),
@@ -277,7 +312,9 @@ def main(argv):
                         label=None
                     )
                 )
-                dest_key_list[i[0]] = base64.urlsafe_b64encode(enc)
+                dest_key_list[h] = base64.urlsafe_b64encode(enc)
+            if errored:
+                argv.exit(1, "Key validation failed")
             ctx = AESGCM(aes_key)
             blob = ctx.encrypt(
                 nonce, b"Type: message\n\n%b" % (
@@ -348,7 +385,7 @@ def main(argv):
                 for i in q2:
                     print(i["id"], i["sender"])
                 # view
-        elif argv.action == "fix":
+        elif argv.action == "check":
             pass
 
 
