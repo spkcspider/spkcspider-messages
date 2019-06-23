@@ -11,8 +11,15 @@ from .core import startTLSFactory
 
 @implementer(smtp.IMessage)
 class SpiderMessage:
-    def __init__(self):
+    finished = False
+
+    def __init__(self, dest):
+        # dest
         self.lines = []
+
+    def request_feeder(self):
+        #  if
+        pass
 
     def lineReceived(self, line):
         self.lines.append(line)
@@ -46,7 +53,7 @@ class SpiderDelivery:
 
     def validateTo(self, user):
         if user.dest.local in self.pseudo_names:
-            return lambda: SpiderMessage()
+            return SpiderMessage(user.dest)
         raise smtp.SMTPBadRcpt(user)
 
 

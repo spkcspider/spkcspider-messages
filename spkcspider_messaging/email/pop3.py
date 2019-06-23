@@ -73,7 +73,7 @@ class SpiderPostbox:
         @raise ValueError or IndexError: When the index does not correspond to
             a message in the mailbox.  The use of ValueError is preferred.
         """
-        raise ValueError
+        pass
 
     def undeleteMessages(self):
         """
