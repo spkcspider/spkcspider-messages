@@ -22,7 +22,7 @@ from django.test import Client
 
 from jsonfield import JSONField
 
-from rdflib import Literal, BNode
+from rdflib import Literal, BNode, RDF
 import requests
 
 from spkcspider.apps.spider.helpers import (
@@ -30,7 +30,7 @@ from spkcspider.apps.spider.helpers import (
 )
 from spkcspider.apps.spider.contents import BaseContent, add_content
 from spkcspider.apps.spider.conf import TOKEN_SIZE
-from spkcspider.apps.spider.templatetags.spider_rdf import literalize
+from spkcspider.apps.spider.helpers import literalize
 from spkcspider.apps.spider.constants import VariantType, ActionUrl, spkcgraph
 
 from spkcspider_messaging.constants import ReferenceType
@@ -116,12 +116,14 @@ class PostBox(BaseContent):
     def map_data(self, name, field, data, graph, context):
         if name == "message_list":
             if data is None:
-                return literalize(data)
+                return RDF.nil
             ret = BNode()
             for nname, val in data.items():
                 value_node = add_property(
                     graph, nname, ref=ret,
-                    literal=literalize(val)
+                    literal=literalize(
+                        val, field, domain_base=context["hostpart"]
+                    )
                 )
 
                 graph.add((
@@ -132,11 +134,13 @@ class PostBox(BaseContent):
             return ret
         elif name == "signatures":
             if data is None:
-                return literalize(data)
-            ret = literalize(data["key"])
+                return RDF.nil
+            ret = literalize(data["key"], domain_base=context["hostpart"])
             value_node = add_property(
                 graph, "signature", ref=ret,
-                literal=literalize(data["signature"])
+                literal=literalize(
+                    data["signature"], field, domain_base=context["hostpart"]
+                )
             )
 
             graph.add((

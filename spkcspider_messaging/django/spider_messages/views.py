@@ -25,7 +25,7 @@ _empty_set = frozenset()
 class ReferenceView(UserTestMixin, View):
     model = WebReference
     form_class = ReferenceForm
-    extract_pupkeyhash = re.compile("\x1epubkeyhash=([^\x1e]+)")
+    extract_pupkeyhash = re.compile("\x1epubkeyhash=([^\x1e=]+)=([^\x1e=]+)")
 
     @method_decorator(csrf_exempt)
     def dispatch(self, request, *args, **kwargs):
@@ -72,7 +72,7 @@ class ReferenceView(UserTestMixin, View):
                     (
                         self.extract_pupkeyhash.search(
                             k.key.associated.info
-                        ).group(1),
+                        ).group(2),
                         {
                             "key": k.key.key,
                             "signature": k.signature

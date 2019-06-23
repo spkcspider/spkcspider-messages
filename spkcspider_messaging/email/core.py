@@ -3,8 +3,12 @@ __all__ = ["load_priv_key", "startTLSProtocol", "startTLSFactory"]
 from getpass import getpass
 
 from cryptography.hazmat.backends import default_backend
+from cryptography.x509 import (
+    load_pem_x509_certificate, load_der_x509_certificate
+)
 from cryptography.hazmat.primitives.serialization import (
-    load_pem_private_key, load_der_private_key
+    load_pem_private_key, load_der_private_key,
+    load_pem_public_key, load_der_public_key
 )
 
 
@@ -42,6 +46,33 @@ def load_priv_key(data):
                 pass
 
     return key, pw
+
+
+def load_public_key(key):
+    defbackend = default_backend()
+    if isinstance(key, str):
+        key = key.encode("utf8")
+    try:
+        return load_pem_x509_certificate(
+            key, defbackend
+        ).public_key()
+    except ValueError:
+        try:
+            return load_der_x509_certificate(
+                key, defbackend
+            ).public_key()
+        except ValueError:
+            try:
+                return load_pem_public_key(
+                    key, defbackend
+                ).public_key()
+            except ValueError:
+                try:
+                    return load_der_public_key(
+                        key, defbackend
+                    ).public_key()
+                except ValueError:
+                    raise
 
 
 class startTLSProtocol(LineReceiver):

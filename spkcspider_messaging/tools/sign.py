@@ -1,4 +1,4 @@
-#! /usr/bin/python3
+#! /usr/bin/env python3
 
 import sys
 import os
@@ -68,7 +68,7 @@ def load_priv_key(data):
 
 
 def main(argv):
-    argv = parser.parse_args(argv[1:])
+    argv = parser.parse_args(argv)
     argv.hash = getattr(hashes, argv.hash)()
     if not os.path.exists(argv.key):
         argv.exit(1, "key does not exist")
@@ -101,4 +101,4 @@ def main(argv):
 
 
 if __name__ == "__main__":
-    main(sys.argv)
+    main(sys.argv[1:])

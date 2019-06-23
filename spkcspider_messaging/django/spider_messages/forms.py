@@ -78,8 +78,7 @@ class PostBoxForm(forms.ModelForm):
         "spider_messages/partials/fields/view_combined_keyhash.html"
     )
     hash_algorithm = forms.CharField(
-        widget=forms.HiddenInput(), disabled=True,
-        initial=settings.SPIDER_HASH_ALGORITHM.name
+        widget=forms.HiddenInput(), disabled=True
     )
     setattr(hash_algorithm, "hashable", False)
     signatures = JsonField(
@@ -94,7 +93,7 @@ class PostBoxForm(forms.ModelForm):
         "spider_messages/partials/fields/view_signatures.html"
     )
 
-    extract_pupkeyhash = re.compile("\x1epubkeyhash=([^\x1e]+)")
+    extract_pupkeyhash = re.compile("\x1epubkeyhash=([^\x1e=]+)=([^\x1e=]+)")
 
     class Meta:
         model = PostBox
@@ -107,25 +106,23 @@ class PostBoxForm(forms.ModelForm):
 
     def __init__(self, scope, **kwargs):
         super().__init__(**kwargs)
-        self.initial["hash_algorithm"] = self.fields["hash_algorithm"].initial
+        self.initial["hash_algorithm"] = settings.SPIDER_HASH_ALGORITHM.name
         if scope in {"view", "raw"}:
-            self.fields["message_list"].initial = [
+            self.initial["message_list"] = [
                 {
                     "id": i.id,
                     "size": i.cached_size,
                     "sender": i.url.split("?", 1)[0]
                 } for i in self.instance.references.all()
             ]
-            self.initial["message_list"] = self.fields["message_list"].initial
         elif scope == "export":
-            self.fields["message_list"].initial = [
+            self.initial["message_list"] = [
                 {
                     "key_list": i.key_list,
                     "rtype": i.rtype,
                     "url": i.url
                 } for i in self.instance.references.all()
             ]
-            self.initial["message_list"] = self.fields["message_list"].initial
         else:
             del self.fields["message_list"]
 
@@ -138,7 +135,7 @@ class PostBoxForm(forms.ModelForm):
             del self.fields["keys"]
         if self.instance.id and self.instance.keys.exists():
             mapped_hashes = map(
-                lambda x: self.extract_pupkeyhash.search(x).group(1),
+                lambda x: self.extract_pupkeyhash.search(x).group(2),
                 self.instance.keys.values_list(
                     "associated_rel__info", flat=True
                 )
@@ -147,11 +144,9 @@ class PostBoxForm(forms.ModelForm):
             ho = get_hashob()
             for mh in mapped_hashes:
                 ho.update(mh.encode("ascii", "ignore"))
-            self.fields["key_activator"].initial = \
-                base64.urlsafe_b64encode(ho.finalize()).decode("ascii")
             self.initial["key_activator"] = \
-                self.fields["key_activator"].initial
-            self.fields["signatures"].initial = [
+                base64.urlsafe_b64encode(ho.finalize()).decode("ascii")
+            self.initial["signatures"] = [
                 {
                     "key": x.key,
                     "hash": x.key.associated.getlist("hash", 1)[0].split(
@@ -201,7 +196,7 @@ class MessageForm(forms.ModelForm):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         if self.instance.id:
-            self.fields["url"].initial = urljoin(
+            self.initial["url"] = urljoin(
                 "{}://{}".format(
                     get_anchor_scheme(),
                     get_anchor_domain()

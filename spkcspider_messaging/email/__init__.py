@@ -1,4 +1,7 @@
+#! /usr/bin/false
+
 import os
+import sys
 import asyncio
 import logging
 from datetime import datetime as dt, timedelta as td
@@ -71,8 +74,7 @@ def main(argv):
         cert = cert.sign(pkey, hashes.SHA512(), default_backend())
         del pkey
 
-        pkey_file = argv.keys[0].rsplit(".", 1)[0]
-        with open(pkey_file, "wb") as f:
+        with open(argv.cert, "wb") as f:
             f.write(cert.public_bytes(serialization.Encoding.PEM))
     if not all(map(os.path.exists, argv.keys)):
         argv.exit(1, "invalid keys")
@@ -132,3 +134,7 @@ def main(argv):
     reactor.listenTCP(argv.pop3_port, pop3_factory, interface=argv.address)
     logger.info("spkcspider pipeline started")
     loop.run_forever()
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])
