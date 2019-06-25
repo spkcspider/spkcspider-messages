@@ -386,7 +386,7 @@ def action_check(argv, access, pkey, pkey_hash, s, response, verb=True):
         initNs={"spkc": spkcgraph},
         initBindings={
             "name": Literal(
-                "key_activator", datatype=XSD.string
+                "attestation", datatype=XSD.string
             ),
 
         }

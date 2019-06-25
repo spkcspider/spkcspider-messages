@@ -65,15 +65,15 @@ class PostBoxForm(forms.ModelForm):
         "view_form_field_template",
         "spider_messages/partials/fields/view_message_list.html"
     )
-    key_activator = forms.CharField(
-        label=_("Key activator"), help_text=_(
+    attestation = forms.CharField(
+        label=_("PostBox Attestation"), help_text=_(
             "Re-sign with every active key for activating new key "
             "or removing a key"
         )
     )
-    setattr(key_activator, "hashable", True)
+    setattr(attestation, "hashable", True)
     setattr(
-        key_activator,
+        attestation,
         "view_form_field_template",
         "spider_messages/partials/fields/view_combined_keyhash.html"
     )
@@ -100,7 +100,7 @@ class PostBoxForm(forms.ModelForm):
         fields = ["only_persistent", "shared", "keys"]
 
     field_order = [
-        "only_persistent", "shared", "keys", "key_activator",
+        "only_persistent", "shared", "keys", "attestation",
         "message_list", "signatures"
     ]
 
@@ -144,7 +144,7 @@ class PostBoxForm(forms.ModelForm):
             ho = get_hashob()
             for mh in mapped_hashes:
                 ho.update(mh.encode("ascii", "ignore"))
-            self.initial["key_activator"] = \
+            self.initial["attestation"] = \
                 base64.urlsafe_b64encode(ho.finalize()).decode("ascii")
             self.initial["signatures"] = [
                 {
@@ -156,7 +156,7 @@ class PostBoxForm(forms.ModelForm):
                 } for x in self.instance.key_infos.all()
             ]
         else:
-            del self.fields["key_activator"]
+            del self.fields["attestation"]
             del self.fields["signatures"]
 
     def clean_signatures(self):
