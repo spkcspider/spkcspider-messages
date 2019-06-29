@@ -5,7 +5,7 @@ document.addEventListener("DOMContentLoaded", function(){
     let element = collection[counter];
     let ilabel = "Item";
     try{
-      ilabel = element.attributes.item_label.value;
+      ilabel = element.dataset.item_label;
     } catch(e){
       console.log(e);
     }

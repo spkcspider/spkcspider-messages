@@ -32,7 +32,7 @@ class SignatureWidget(widgets.Textarea):
         attrs.setdefault("class", "")
         attrs["class"] += " SignatureEditorTarget"
         # don't access them as they are lazy evaluated
-        attrs["item_label"] = item_label
+        attrs["data-item_label"] = item_label
         wrapper_attrs["style"] += " width:100%"
         self.wrapper_attrs = wrapper_attrs.copy()
         super().__init__(attrs=attrs, **kwargs)
