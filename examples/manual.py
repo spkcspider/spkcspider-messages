@@ -28,6 +28,11 @@ from rdflib import Graph, XSD, Literal
 from spkcspider.apps.spider.helpers import merge_get_url
 from spkcspider.apps.spider.constants import static_token_matcher, spkcgraph
 
+from spkcspider_messaging.attestation import (
+    AttestationChecker, AttestationResult
+)
+
+
 logger = logging.getLogger(__name__)
 
 parser = argparse.ArgumentParser(
@@ -36,6 +41,10 @@ parser = argparse.ArgumentParser(
 parser.add_argument(
     '--key', action='store', dest="key",
     default="key.priv", help='Private Key'
+)
+parser.add_argument(
+    '--db', action='store', dest="attestation",
+    default="attestation.sqlite3", help='DB for key attestation'
 )
 parser.add_argument(
     '--verbose', "-v", action='count', default=0,
@@ -209,6 +218,7 @@ def action_send(argv, access, pkey, pkey_hash, s, response):
         digest = hashes.Hash(src_hash, backend=default_backend())
         digest.update(partner_pem_public)
         partner_keyhash = digest.finalize().hex()
+        # encrypt decryption key
         src_key_list[partner_keyhash] = base64.urlsafe_b64encode(enc)
 
     dest_hash = getattr(hashes, dest_info["hash_algorithm"])()
@@ -244,6 +254,7 @@ def action_send(argv, access, pkey, pkey_hash, s, response):
                 label=None
             )
         )
+        # encrypt decryption key
         dest_key_list[h] = base64.urlsafe_b64encode(enc)
     if errored:
         parser.exit(1, "Key validation failed\n")
@@ -419,6 +430,7 @@ def action_check(argv, access, pkey, pkey_hash, s, response, verb=True):
 
 def main(argv):
     argv = parser.parse_args(argv)
+    argv.attestation = AttestationChecker(argv.attestation)
     if not os.path.exists(argv.key):
         parser.exit(1, "key does not exist\n")
     match = static_token_matcher.match(argv.url)
@@ -469,15 +481,12 @@ def main(argv):
 
     with requests.Session() as s:
         if access == "list":
-            response = s.get(
-                merge_get_url(
-                    argv.url, raw="embed", info="_type=PostBox"
-                )
+            own_url = merge_get_url(
+                argv.url, raw="embed", info="_type=PostBox"
             )
         else:
-            response = s.get(
-                merge_get_url(argv.url, raw="embed")
-            )
+            own_url = merge_get_url(argv.url, raw="embed")
+        response = s.get(own_url)
         if not response.ok:
             logging.info("Url returned error: %s\n", response.text)
             parser.exit(1, "url invalid\n")
@@ -508,13 +517,28 @@ def main(argv):
             src.setdefault(str(i.postbox_value), {})
             src[str(i.postbox_value)][str(i.key_name)] = i.key_value
 
-        src_hash = getattr(
+        # algorithm for hashing
+        argv.src_hash_algo = getattr(
             hashes, next(iter(src.values()))["hash_algorithm"].upper()
         )()
 
-        digest = hashes.Hash(src_hash, backend=default_backend())
+        digest = hashes.Hash(argv.src_hash_algo, backend=default_backend())
         digest.update(pem_public)
         pkey_hash = digest.finalize().hex()
+        argv.attestation.add(
+            own_url.split("?", 1)[0], [pkey_hash], algo=argv.src_hash_algo
+        )
+        result_own = argv.attestation.check(
+            own_url.split("?", 1)[0],
+            map(
+                lambda x: (x[0], x[1]["key"], x[1]["signature"])
+            ),
+            algo=argv.src_hash_algo
+        )
+        if result_own != AttestationResult.success:
+            logging.critical("Home base url contains invalid keys, hacked?")
+            parser.exit(1, "invalid keys\n")
+        # check own domain
 
         if argv.action == "view":
             response = s.post(

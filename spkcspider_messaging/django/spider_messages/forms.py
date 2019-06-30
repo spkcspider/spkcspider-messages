@@ -1,6 +1,5 @@
 __all__ = ["ReferenceForm", "PostBoxForm", "MessageForm"]
 
-import base64
 import re
 import json
 from urllib.parse import urljoin
@@ -144,8 +143,7 @@ class PostBoxForm(forms.ModelForm):
             ho = get_hashob()
             for mh in mapped_hashes:
                 ho.update(mh.encode("ascii", "ignore"))
-            self.initial["attestation"] = \
-                base64.urlsafe_b64encode(ho.finalize()).decode("ascii")
+            self.initial["attestation"] = ho.finalize().hex()
             self.initial["signatures"] = [
                 {
                     "key": x.key,

@@ -85,7 +85,7 @@ def main(argv):
             argv.exit(1, "invalid key: %s" % argv.key)
     for tosign in argv.sign:
         signature = pkey.sign(
-            base64.urlsafe_b64decode(tosign),
+            tosign.decode("hex"),
             padding.PSS(
                 mgf=padding.MGF1(argv.hash),
                 salt_length=padding.PSS.MAX_LENGTH

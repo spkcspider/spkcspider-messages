@@ -1,6 +1,7 @@
-db.sqlite3
-celery.sqlite3
-key.*
+/db.*
+/celery.*
+/attestation.*
+/key.*
 
 cgihandler.cgi
 cgihandler.fcgi
