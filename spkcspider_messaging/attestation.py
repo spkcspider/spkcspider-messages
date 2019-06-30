@@ -47,6 +47,8 @@ def _extract_hash_key(val):
         key = _load_public_key(val[1])
         if len(val) >= 3:
             signature = val[2]
+            if isinstance(signature, str):
+                signature = base64.urlsafe_b64decode(signature)
     else:
         v = val
     if isinstance(v, bytes):
@@ -137,6 +139,8 @@ class AttestationChecker(object):
                 _key_to_hash_helper(key_signatures)
             ))
             attestation = cls.calc_attestation(key_hashes, algo)
+        elif isinstance(attestation, str):
+            attestation = base64.urlsafe_b64decode(attestation)
         elif not attestation:
             raise ValueError("Provide either attestation or hash algo")
         errored = []
@@ -161,7 +165,7 @@ class AttestationChecker(object):
 
     def add(self, domain, hash_keys, attestation=None, algo=None, _cur=None):
         if isinstance(attestation, str):
-            attestation = attestation.decode("hex")
+            attestation = base64.urlsafe_b64decode(attestation)
         elif not attestation and algo:
             attestation = self.calc_attestation(hash_keys, algo)
         if _cur:
@@ -205,7 +209,7 @@ class AttestationChecker(object):
             to_check
         ))
         if isinstance(attestation, str):
-            attestation = attestation.decode("hex")
+            attestation = base64.urlsafe_b64decode(attestation)
         elif not attestation and algo:
             attestation = self.calc_attestation(hash_keys, algo)
 
