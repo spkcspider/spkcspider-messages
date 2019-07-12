@@ -27,7 +27,7 @@ from rdflib import Graph, XSD, Literal
 
 from spkcspider.apps.spider.helpers import merge_get_url
 from spkcspider.apps.spider.constants import static_token_matcher, spkcgraph
-
+from spkcspider_messaging.constants import ReferenceType
 from spkcspider_messaging.attestation import (
     AttestationChecker, AttestationResult
 )
@@ -113,12 +113,12 @@ def load_public_key(key):
             try:
                 return load_pem_public_key(
                     key, defbackend
-                ).public_key()
+                )
             except ValueError:
                 try:
                     return load_der_public_key(
                         key, defbackend
-                    ).public_key()
+                    )
                 except ValueError:
                     raise
 
@@ -276,7 +276,8 @@ def action_send(argv, access, pkey, pkey_hash, s, response):
     )
     response_dest = s.post(
         dest_create, body={
-            "": None,
+            "url": response.url,
+            "rtype": ReferenceType.message,
             "key_list": dest_key_list
         }
     )
@@ -335,8 +336,6 @@ def action_view(argv, access, pkey, pkey_hash, s, response):
 
 def action_check(argv, access, pkey, pkey_hash, s, response, verb=True):
     src = {}
-    src_key_list = {}
-    defbackend = default_backend()
 
     g = Graph()
     g.parse(data=response.content, format="turtle")
@@ -366,26 +365,12 @@ def action_check(argv, access, pkey, pkey_hash, s, response, verb=True):
     src_hash = getattr(
         hashes, next(iter(src.values()))["hash_algorithm"].upper()
     )()
-    for k in src.values():
-        partner_key = load_public_key(k["key"])
-
-        partner_pem_public = partner_key.public_bytes(
-            encoding=serialization.Encoding.PEM,
-            format=serialization.PublicFormat.SubjectPublicKeyInfo
-        )
-        digest = hashes.Hash(src_hash, backend=default_backend())
-        digest.update(partner_pem_public)
-        partner_keyhash = digest.finalize().hex()
-        src_key_list[partner_keyhash] = partner_key
-        k["partner_key"] = src_key_list[partner_keyhash]
-
-    updater = hashes.Hash(
-        src_hash, backend=defbackend
+    src_activator_value, errored = argv.attestation.check_signatures(
+        map(
+            lambda x: (x["key"], x["signature"]),
+            src.values()
+        ), algo=src_hash
     )
-    for mh in sorted(src_key_list.keys()):
-        updater.update(mh.encode("ascii", "ignore"))
-
-    src_activator_value = updater.finalize()
     tmp = list(g.query(
         """
             SELECT DISTINCT ?name ?value
@@ -404,25 +389,6 @@ def action_check(argv, access, pkey, pkey_hash, s, response, verb=True):
     ))
     if base64.urlsafe_b64decode(tmp[0].value) != src_activator_value:
         return "activator doesn't match shown activator"
-
-    errored = []
-
-    for partner, val in src.items():
-        try:
-            hashalgo, signature = val["signature"].split("=", 1)
-            hashalgo = getattr(hashes, hashalgo.upper())()
-            val["partner_key"].verify(
-                base64.urlsafe_b64decode(signature),
-                src_activator_value,
-                padding.PSS(
-                    mgf=padding.MGF1(hashalgo),
-                    salt_length=padding.PSS.MAX_LENGTH
-                ),
-                hashalgo
-            )
-        except InvalidSignature:
-            errored.append(partner)
-            continue
     if errored:
         return ", ".join(errored)
     return True
@@ -525,19 +491,21 @@ def main(argv):
         digest = hashes.Hash(argv.src_hash_algo, backend=default_backend())
         digest.update(pem_public)
         pkey_hash = digest.finalize().hex()
-        argv.attestation.add(
-            own_url.split("?", 1)[0], [pkey_hash], algo=argv.src_hash_algo
-        )
-        result_own = argv.attestation.check(
-            own_url.split("?", 1)[0],
-            map(
-                lambda x: (x[0], x[1]["key"], x[1]["signature"])
-            ),
-            algo=argv.src_hash_algo
-        )
-        if result_own != AttestationResult.success:
-            logging.critical("Home base url contains invalid keys, hacked?")
-            parser.exit(1, "invalid keys\n")
+        argv.attestation.add(own_url.split("?", 1)[0], [pkey_hash])
+        if argv.action != "check":
+            result_own = argv.attestation.check(
+                own_url.split("?", 1)[0],
+                map(
+                    lambda x: (x["key"], x["signature"]),
+                    src.values()
+                ),
+                algo=argv.src_hash_algo
+            )
+            if result_own != AttestationResult.success:
+                logging.critical(
+                    "Home base url contains invalid keys, hacked?"
+                )
+                parser.exit(1, "invalid keys\n")
         # check own domain
 
         if argv.action == "view":

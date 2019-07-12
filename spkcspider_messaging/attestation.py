@@ -26,6 +26,10 @@ def _load_public_key(key):
         key = key.encode("utf8")
     elif hasattr(key, "public_bytes"):
         return key
+    elif hasattr(key, "public_key"):
+        return key.public_key()
+    if isinstance(key, str):
+        key = key.encode("utf8")
     try:
         return load_pem_x509_certificate(
             key, defbackend
@@ -34,31 +38,59 @@ def _load_public_key(key):
         try:
             return load_pem_public_key(
                 key, defbackend
-            ).public_key()
+            )
         except ValueError:
             raise
 
 
-def _extract_hash_key(val):
+def _extract_hash_key(val, algo=None, use_hash=True):
     key = None
     signature = None
     if isinstance(val, (tuple, list)):
         v = val[0]
-        key = _load_public_key(val[1])
+        if len(val) >= 2:
+            try:
+                key = _load_public_key(val[1])
+                if not use_hash:
+                    v = key
+            except ValueError:
+                if len(val) >= 3:
+                    raise
+                # activate second pattern
+                v = _load_public_key(val[0])
+                signature = val[1]
         if len(val) >= 3:
             signature = val[2]
-            if isinstance(signature, str):
-                signature = base64.urlsafe_b64decode(signature)
     else:
         v = val
+
     if isinstance(v, bytes):
         return (v, key, signature)
     elif isinstance(v, str):
+        v = v.split("=", 1)[-1]
         return (binascii.unhexlify(v), key, signature)
+    elif hasattr(v, "public_key"):
+        v = v.public_key()
+
+    if hasattr(v, "public_bytes"):
+        digest = hashes.Hash(algo, backend=default_backend())
+        digest.update(
+            v.public_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PublicFormat.SubjectPublicKeyInfo
+            )
+        )
+        return (
+            digest.finalize(),
+            v,
+            signature
+        )
+    else:
+        raise NotImplementedError()
 
 
-def _extract_only_hash(val):
-    return _extract_hash_key[0]
+def _extract_only_hash(val, algo=None, use_hash=True):
+    return _extract_hash_key(val, algo=algo, use_hash=use_hash)[0]
 
 
 class AttestationChecker(object):
@@ -106,49 +138,47 @@ class AttestationChecker(object):
 
     @classmethod
     def calc_attestation(cls, key_list, algo):
+        """
+            key_hashes:
+                pairs (hash, key): use hash of key
+                pairs (key, signature): autogeneration of missing key hash
+                triples (hash, key, signature):
+                    use hash of key
+        """
         hasher = hashes.Hash(algo, backend=default_backend())
-        for digest in sorted(map(_extract_only_hash, key_list)):
+        for digest in sorted(map(
+            lambda x: _extract_only_hash(x, algo),
+            key_list
+        )):
             hasher.update(digest)
         return hasher.finalize()
 
     @classmethod
-    def check_signatures(cls, key_signatures, algo=None, attestation=None):
+    def check_signatures(cls, key_hashes, algo=None, attestation=None):
         """
             attestation: provide attestation instead of generating it again
-            key_signatures:
+            key_hashes:
+                pairs (hash, key): fails
                 pairs (key, signature): autogeneration of missing key hash
                 triples (hash, key, signature):
                     hash provided as first argument (more efficient)
         """
-        defbackend = default_backend()
+        key_hashes = [
+             _extract_hash_key(x, algo) for x in key_hashes
+        ]
 
         if not attestation and algo:
-            def _key_to_hash_helper(x):
-                if len(x) == 3:
-                    return x[0]
-                digest = hashes.Hash(algo, backend=defbackend)
-                digest.update(
-                    _load_public_key(x[-2]).public_bytes(
-                        encoding=serialization.Encoding.PEM,
-                        format=serialization.PublicFormat.SubjectPublicKeyInfo
-                    )
-                )
-                return digest.finalize()
-
-            key_hashes = list(map(
-                _key_to_hash_helper(key_signatures)
-            ))
             attestation = cls.calc_attestation(key_hashes, algo)
         elif isinstance(attestation, str):
             attestation = base64.urlsafe_b64decode(attestation)
         elif not attestation:
             raise ValueError("Provide either attestation or hash algo")
         errored = []
-        for entry in key_signatures:
-            key = entry[-2]
-            hashalgo, signature = entry[-1].split("=", 1)
-            hashalgo = getattr(hashes, hashalgo.upper())()
+        for entry in key_hashes:
+            key = entry[1]
             try:
+                hashalgo, signature = entry[2].split("=", 1)
+                hashalgo = getattr(hashes, hashalgo.upper())()
                 key.verify(
                     base64.urlsafe_b64decode(signature),
                     attestation,
@@ -158,12 +188,26 @@ class AttestationChecker(object):
                     ),
                     hashalgo
                 )
-            except InvalidSignature:
+            except (InvalidSignature, ValueError):
                 errored.append(entry)
                 continue
         return (attestation, errored)
 
-    def add(self, domain, hash_keys, attestation=None, algo=None, _cur=None):
+    def add(
+        self, domain, hash_keys, attestation=None, algo=None, _cur=None
+    ):
+        """
+            attestation: provide attestation instead of generating it again
+            hash_keys:
+                string/bytes: use as hash
+                pairs (hash, key): use hash
+                pairs (key, signature): calc hash
+                triples (hash, key, signature): use hash
+        """
+        hash_keys = list(map(
+            lambda x: _extract_hash_key(x, algo),
+            hash_keys
+        ))
         if isinstance(attestation, str):
             attestation = base64.urlsafe_b64decode(attestation)
         elif not attestation and algo:
@@ -190,7 +234,7 @@ class AttestationChecker(object):
         cursor.executemany("""
             INSERT OR IGNORE INTO key (domain, hash)
             VALUES(?, ?);
-        """, zip(repeat(domainid), map(_extract_only_hash, hash_keys)))
+        """, zip(repeat(domainid), map(lambda x: x[0], hash_keys)))
         self.con.commit()
 
     def check(
@@ -199,25 +243,25 @@ class AttestationChecker(object):
         """
             attestation: provide attestation
             hash_keys:
-                string/bytes: use as hash
-                triples (hash, key, signature): check also signature
+                pairs (key, signature): check also signature
+                triples (hash, key, signature): check signature, recalc
         """
-        to_check = list(map(_extract_hash_key, hash_keys))
-        only_hashes = set(map(_extract_only_hash, to_check))
-        to_check = list(filter(
-            lambda x: isinstance(x, (list, tuple)) and len(x) >= 3,
-            to_check
+        hash_keys = list(map(
+            lambda x: _extract_hash_key(x, algo, use_hash=False),
+            hash_keys
         ))
+        errors = []
+        only_hashes = set(map(lambda x: x[0], hash_keys))
         if isinstance(attestation, str):
             attestation = base64.urlsafe_b64decode(attestation)
         elif not attestation and algo:
             attestation = self.calc_attestation(hash_keys, algo)
 
-        if to_check and attestation:
-            to_check_result = self.check_signatures(
-                to_check, attestation=attestation
-            )
-            if to_check_result[1]:
+        if attestation:
+            errors = self.check_signatures(
+                hash_keys, attestation=attestation
+            )[1]
+            if errors:
                 return AttestationResult.error
 
         domain_row = self.con.execute("""
@@ -225,10 +269,10 @@ class AttestationChecker(object):
         """, (domain,)).fetchone()
         if not domain_row:
             if auto_add:
-                self.add(domain, only_hashes, attestation=attestation)
+                self.add(domain, hash_keys, attestation=attestation)
                 return AttestationResult.domain_unknown
             else:
-                return AttestationResult.domain_unknown
+                return AttestationResult.error
         if attestation and domain_row[1] == attestation:
             return AttestationResult.success
 
