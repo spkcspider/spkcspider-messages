@@ -43,7 +43,7 @@ def _load_public_key(key):
             raise
 
 
-def _extract_hash_key(val, algo=None, use_hash=True):
+def _extract_hash_key2(val, algo=None):
     key = None
     signature = None
     if isinstance(val, (tuple, list)):
@@ -51,8 +51,6 @@ def _extract_hash_key(val, algo=None, use_hash=True):
         if len(val) >= 2:
             try:
                 key = _load_public_key(val[1])
-                if not use_hash:
-                    v = key
             except ValueError:
                 if len(val) >= 3:
                     raise
@@ -89,8 +87,23 @@ def _extract_hash_key(val, algo=None, use_hash=True):
         raise NotImplementedError()
 
 
-def _extract_only_hash(val, algo=None, use_hash=True):
-    return _extract_hash_key(val, algo=algo, use_hash=use_hash)[0]
+def _extract_hash_key(val, algo=None, check_hash=False):
+    ret = _extract_hash_key2(val, algo=algo)
+    if check_hash and algo and ret[1] and len(val) >= 2:
+        digest = hashes.Hash(algo, backend=default_backend())
+        digest.update(
+            ret[1].public_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PublicFormat.SubjectPublicKeyInfo
+            )
+        )
+        if val[0] != digest.finalize():
+            raise ValueError("Key does not match hash")
+    return ret
+
+
+def _extract_only_hash(val, algo=None, check_hash=False):
+    return _extract_hash_key(val, algo=algo, check_hash=check_hash)[0]
 
 
 class AttestationChecker(object):
@@ -200,12 +213,13 @@ class AttestationChecker(object):
             attestation: provide attestation instead of generating it again
             hash_keys:
                 string/bytes: use as hash
+                public_keys/certs: calc hash (in combination with algo)
                 pairs (hash, key): use hash
                 pairs (key, signature): calc hash
                 triples (hash, key, signature): use hash
         """
         hash_keys = list(map(
-            lambda x: _extract_hash_key(x, algo),
+            lambda x: _extract_hash_key(x, algo, not _cur),
             hash_keys
         ))
         if isinstance(attestation, str):
@@ -247,7 +261,7 @@ class AttestationChecker(object):
                 triples (hash, key, signature): check signature, recalc
         """
         hash_keys = list(map(
-            lambda x: _extract_hash_key(x, algo, use_hash=False),
+            lambda x: _extract_hash_key(x, algo, True),
             hash_keys
         ))
         errors = []
