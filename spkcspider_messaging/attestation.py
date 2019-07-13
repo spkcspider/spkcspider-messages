@@ -153,6 +153,7 @@ class AttestationChecker(object):
     def calc_attestation(cls, key_list, algo):
         """
             key_hashes:
+                string/bytes: hashes
                 pairs (hash, key): use hash of key
                 pairs (key, signature): autogeneration of missing key hash
                 triples (hash, key, signature):

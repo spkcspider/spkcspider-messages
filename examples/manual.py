@@ -373,7 +373,7 @@ def action_check(argv, access, pkey, pkey_hash, s, response, verb=True):
     )
     tmp = list(g.query(
         """
-            SELECT DISTINCT ?name ?value
+            SELECT DISTINCT ?value
             WHERE {
                 ?base spkc:name ?name .
                 ?base spkc:value ?value .
@@ -387,10 +387,10 @@ def action_check(argv, access, pkey, pkey_hash, s, response, verb=True):
 
         }
     ))
-    if base64.urlsafe_b64decode(tmp[0].value) != src_activator_value:
+    if base64.urlsafe_b64decode(tmp[0][0].value) != src_activator_value:
         return "activator doesn't match shown activator"
     if errored:
-        return ", ".join(errored)
+        return ", ".join(map(lambda x: x[0].hex(), errored))
     return True
 
 
