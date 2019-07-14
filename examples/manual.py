@@ -7,6 +7,7 @@ import getpass
 import logging
 import base64
 import json
+from urllib.parse import urljoin
 # import re
 
 import requests
@@ -129,24 +130,25 @@ def load_public_key(key):
 
 def replace_action(url, action):
     url = url.split("?", 1)
-    "?".join(
-        "/".join(
-            url.rstrip("/").rsplit("/", 1)[0], action
-        ),
-        url[1]
+    return "?".join(
+        [
+            urljoin(url[0].rstrip("/").rsplit("/", 1)[0], action),
+            url[1]
+        ]
     )
 
 
 def action_send(argv, access, pkey, pkey_hash, s, response):
-    url = merge_get_url(argv.url, raw="true")
     g = Graph()
     g.parse(data=response.content, format="turtle")
-    if (
-        None, spkcgraph["create:name"], Literal(
+    url = g.value(
+        predicate=spkcgraph["create:name"], object=Literal(
             "MessageContent", datatype=XSD.string
         )
-    ) not in g:
+    )
+    if not url:
         parser.exit(1, "Source does not support action\n")
+    url = merge_get_url(url, raw="true")
     response_dest = s.get(
         merge_get_url(argv.dest, raw="embed")
     )
@@ -156,11 +158,13 @@ def action_send(argv, access, pkey, pkey_hash, s, response):
     g_dest = Graph()
     g_dest.parse(data=response.content, format="turtle")
     dest_create = g_dest.value(
-        predicate=spkcgraph["spkc:feature:name"],
+        predicate=spkcgraph["feature:name"],
         object=Literal(
             "webrefpush", datatype=XSD.string
         )
     )
+    if not dest_create:
+        parser.exit(1, "dest does not support webrefpush feature\n")
     dest_info = s.get(dest_create).json
     url_create = replace_action(url, "add/MessageContent/")
     response = s.get(url_create)
@@ -170,7 +174,7 @@ def action_send(argv, access, pkey, pkey_hash, s, response):
     g = Graph()
     g.parse(data=response.content, format="html")
     if (
-        None, spkcgraph["spkc:csrftoken"], None
+        None, spkcgraph["csrftoken"], None
     ) not in g_dest:
         logging.error("failure: no csrftoken: %s", response.text)
         parser.exit(1, "failure: no csrftoken\n")
@@ -434,7 +438,7 @@ def main(argv):
             parser.exit(1, "invalid url\n")
         access2 = match2.groupdict()["access"]
         if (
-            access != "list" or
+            access not in {"list", "view"} or
             access2 not in {"list", "view"}
         ):
             parser.exit(1, "url doesn't match action\n")
