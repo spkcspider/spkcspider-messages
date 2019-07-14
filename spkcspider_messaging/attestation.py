@@ -97,7 +97,7 @@ def _extract_hash_key(val, algo=None, check_hash=False):
                 format=serialization.PublicFormat.SubjectPublicKeyInfo
             )
         )
-        if val[0] != digest.finalize():
+        if ret[0] != digest.finalize():
             raise ValueError("Key does not match hash")
     return ret
 

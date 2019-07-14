@@ -51,6 +51,10 @@ parser.add_argument(
     help='Verbosity'
 )
 parser.add_argument(
+    '--token', default="",
+    help='Login Token'
+)
+parser.add_argument(
     'url',
     help='Postbox/Message'
 )
@@ -430,7 +434,7 @@ def main(argv):
             parser.exit(1, "invalid url\n")
         access2 = match2.groupdict()["access"]
         if (
-            access == "list" or
+            access != "list" or
             access2 not in {"list", "view"}
         ):
             parser.exit(1, "url doesn't match action\n")
@@ -452,7 +456,9 @@ def main(argv):
             )
         else:
             own_url = merge_get_url(argv.url, raw="embed")
-        response = s.get(own_url)
+        response = s.get(own_url, headers={
+            "X-TOKEN": argv.token
+        })
         if not response.ok:
             logging.info("Url returned error: %s\n", response.text)
             parser.exit(1, "url invalid\n")

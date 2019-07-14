@@ -70,6 +70,11 @@ class PostBoxForm(forms.ModelForm):
         label=_("PostBox Attestation"), help_text=_(
             "Re-sign with every active key for activating new key "
             "or removing a key"
+        ), required=False,
+        widget=forms.TextInput(
+            attrs={
+                "readonly": True
+            }
         )
     )
     setattr(attestation, "hashable", True)
