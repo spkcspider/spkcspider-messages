@@ -73,7 +73,8 @@ class PostBoxForm(forms.ModelForm):
         ), required=False,
         widget=forms.TextInput(
             attrs={
-                "readonly": True
+                "readonly": True,
+                "style": "width:100%"
             }
         )
     )

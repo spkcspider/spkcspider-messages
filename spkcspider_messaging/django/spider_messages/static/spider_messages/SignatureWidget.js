@@ -15,6 +15,7 @@ document.addEventListener("DOMContentLoaded", function(){
       disable_array_add: true,
       disable_array_reorder: true,
       disable_array_delete: true,
+      disable_collapse: true,
       disable_edit_json:true,
       disable_properties:true,
       no_additional_properties:true,
@@ -28,7 +29,6 @@ document.addEventListener("DOMContentLoaded", function(){
             "style": "width:100%"
           }
         },
-        "format": "table",
         "items": {
           "title": ilabel,
           "type": "object",
