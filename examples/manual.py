@@ -3,27 +3,17 @@ import io
 import sys
 import os
 import argparse
-import getpass
 import logging
 import base64
 import json
-from urllib.parse import urljoin
 # import re
 
 import requests
 # from cryptography.x509.oid import NameOID
-from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
-from cryptography.x509 import (
-    load_pem_x509_certificate, load_der_x509_certificate
-)
-from cryptography.hazmat.primitives.serialization import (
-    load_pem_private_key, load_der_private_key,
-    load_pem_public_key, load_der_public_key
-)
 from rdflib import Graph, XSD, Literal
 
 from spkcspider.apps.spider.helpers import merge_get_url
@@ -32,6 +22,7 @@ from spkcspider_messaging.constants import ReferenceType
 from spkcspider_messaging.attestation import (
     AttestationChecker, AttestationResult
 )
+from spkcspider_messaging.keys import load_priv_key
 
 
 logger = logging.getLogger(__name__)
@@ -53,7 +44,7 @@ parser.add_argument(
 )
 parser.add_argument(
     '--token', default="",
-    help='Login Token'
+    help='Optional login token, requires elsewise auth token for postbox'
 )
 parser.add_argument(
     'url',
@@ -69,76 +60,20 @@ send_parser.add_argument(
 )
 
 
-def load_priv_key(data):
-    key = None
-    backend = None
-    pw = None
-    defbackend = default_backend()
-    try:
-        key = load_pem_private_key(data, None)
-    except ValueError:
-        pass
-    except TypeError:
-        key = load_pem_private_key(data, None, defbackend)
-    if not backend:
-        try:
-            key = load_der_private_key(data, None, defbackend)
-        except ValueError:
-            pass
-        except TypeError:
-            backend = load_der_private_key
-    if backend:
-        while not key:
-            try:
-                key = load_der_private_key(
-                    data,
-                    getpass("Enter passphrase:"),
-                    defbackend
-                )
-            except TypeError:
-                pass
-
-    return key, pw
-
-
-def load_public_key(key):
-    defbackend = default_backend()
-    if isinstance(key, str):
-        key = key.encode("utf8")
-    try:
-        return load_pem_x509_certificate(
-            key, defbackend
-        ).public_key()
-    except ValueError:
-        try:
-            return load_der_x509_certificate(
-                key, defbackend
-            ).public_key()
-        except ValueError:
-            try:
-                return load_pem_public_key(
-                    key, defbackend
-                )
-            except ValueError:
-                try:
-                    return load_der_public_key(
-                        key, defbackend
-                    )
-                except ValueError:
-                    raise
-
-
 def replace_action(url, action):
     url = url.split("?", 1)
+    # urljoin does not join correctly, removes token because of no ending /
     return "?".join(
         [
-            urljoin(url[0].rstrip("/").rsplit("/", 1)[0], action),
+            "/".join((
+                url[0].rstrip("/").rsplit("/", 1)[0], action.lstrip("/")
+            )),
             url[1]
         ]
     )
 
 
-def action_send(argv, access, pkey, pkey_hash, s, response):
+def action_send(argv, access, pkey, pkey_hash, s, response, src_keys):
     g = Graph()
     g.parse(data=response.content, format="turtle")
     url = g.value(
@@ -147,14 +82,15 @@ def action_send(argv, access, pkey, pkey_hash, s, response):
         )
     )
     if not url:
-        parser.exit(1, "Source does not support action\n")
+        parser.exit(1, "Source does not support action, logged in?\n")
     url = merge_get_url(url, raw="true")
     response_dest = s.get(
-        merge_get_url(argv.dest, raw="embed")
+        merge_get_url(argv.dest, raw="embed",)
     )
     if not response_dest.ok:
         logging.info("Dest returned error: %s", response_dest.text)
         parser.exit(1, "url invalid\n")
+    dest = {}
     g_dest = Graph()
     g_dest.parse(data=response.content, format="turtle")
     dest_create = g_dest.value(
@@ -165,121 +101,110 @@ def action_send(argv, access, pkey, pkey_hash, s, response):
     )
     if not dest_create:
         parser.exit(1, "dest does not support webrefpush feature\n")
-    dest_info = s.get(dest_create).json
-    url_create = replace_action(url, "add/MessageContent/")
-    response = s.get(url_create)
-    if not response.ok:
-        logging.error("Creation failed: %s", response.text)
-        parser.exit(1, "Creation failed: %s" % response.text)
-    g = Graph()
-    g.parse(data=response.content, format="html")
-    if (
-        None, spkcgraph["csrftoken"], None
-    ) not in g_dest:
-        logging.error("failure: no csrftoken: %s", response.text)
-        parser.exit(1, "failure: no csrftoken\n")
-    blob = sys.stdin.read()
-    aes_key = AESGCM.generate_key(bit_length=256)
-    nonce = os.urandom(20)
-    src = {}
-    src_key_list = {}
-    dest_key_list = {}
-    defbackend = default_backend()
+    response_dest = s.get(
+        merge_get_url(dest_create, raw="embed",)
+    )
+    if not response_dest.ok:
+        logging.info("Dest returned error: %s", response_dest.text)
+        parser.exit(1, "url invalid\n")
+    g_dest = Graph()
+    g_dest.parse(data=response_dest.content, format="turtle")
 
     for i in g.query(
         """
-            SELECT DISTINCT ?key_base ?key_name ?key_value
+            SELECT
+            ?postbox_value ?postbox_value ?key_name ?key_value
             WHERE {
-                ?base spkc:name ?keys_name .
-                ?base spkc:value ?key_base .
-                ?key_base spkc:properties ?key_base_prop .
+                ?base spkc:name ?postbox_name .
+                ?base spkc:value ?postbox_value .
+                ?postbox_value spkc:properties ?key_base_prop .
                 ?key_base_prop spkc:name ?key_name .
                 ?key_base_prop spkc:value ?key_value .
             }
         """,
         initNs={"spkc": spkcgraph},
         initBindings={
-            "keys_name": Literal(
+            "postbox_name": Literal(
                 "signatures", datatype=XSD.string
             )
         }
     ):
-        src.setdefault(str(i.key_base), {})
-        src[str(i.postbox_value)][str(i.key_name)] = i.key_value
+        dest.setdefault(str(i.postbox_value), {})
+        dest[str(i.postbox_value)][str(i.key_name)] = i.key_value
+    dest_hash = getattr(
+        hashes, next(iter(dest.values()))["hash_algorithm"].upper()
+    )()
+    result_dest, errored, dest_keys = argv.attestation.check(
+        response_dest.url.split("?", 1)[0],
+        map(
+            lambda x: (x["key"], x["signature"]),
+            dest.values()
+        ),
+        algo=dest_hash
+    )
+    if result_dest != AttestationResult.success:
+        logging.critical(
+            "Dest base url contains invalid keys."
+        )
+        parser.exit(1, "dest contains invalid keys\n")
 
-    src_hash = getattr(hashes, next(iter(src))["hash_algorithm"].upper())()
-    for k in src.values():
-        partner_key = load_public_key(k["key"])
-
-        enc = partner_key.encrypt(
+    blob = sys.stdin.read()
+    aes_key = AESGCM.generate_key(bit_length=256)
+    nonce = os.urandom(20)
+    src_key_list = {}
+    dest_key_list = {}
+    for k in src_keys:
+        enc = k[1].encrypt(
             aes_key,
             padding.OAEP(
-                mgf=padding.MGF1(algorithm=src_hash),
-                algorithm=src_hash,
-                label=None
-            )
-        )
-        partner_pem_public = partner_key.public_key().public_bytes(
-            encoding=serialization.Encoding.PEM,
-            format=serialization.PublicFormat.SubjectPublicKeyInfo
-        )
-        digest = hashes.Hash(src_hash, backend=default_backend())
-        digest.update(partner_pem_public)
-        partner_keyhash = digest.finalize().hex()
-        # encrypt decryption key
-        src_key_list[partner_keyhash] = base64.urlsafe_b64encode(enc)
-
-    dest_hash = getattr(hashes, dest_info["hash_algorithm"])()
-    updater = hashes.Hash(dest_hash, backend=defbackend)
-    for mh in sorted(dest_info["keys"].keys()):
-        updater.update(mh.encode("ascii", "ignore"))
-
-    dest_activator_value = updater.finalize()
-    errored = []
-
-    for h, val in dest_info["keys"].items():
-        dest_key = load_public_key(val["key"])
-        hashalgo, signature = val["signature"].split("=", 1)
-        hashalgo = getattr(hashes, hashalgo.upper())()
-        try:
-            dest_key.verify(
-                base64.urlsafe_b64decode(signature),
-                dest_activator_value,
-                padding.PSS(
-                    mgf=padding.MGF1(hashalgo),
-                    salt_length=padding.PSS.MAX_LENGTH
-                ),
-                hashalgo
-            )
-        except InvalidSignature:
-            errored.append(h)
-            continue
-        enc = dest_key.encrypt(
-            aes_key,
-            padding.OAEP(
-                mgf=padding.MGF1(algorithm=argv.hash),
-                algorithm=argv.hash,
-                label=None
+                mgf=padding.MGF1(algorithm=argv.src_hash_algo),
+                algorithm=argv.src_hash_algo, label=None
             )
         )
         # encrypt decryption key
-        dest_key_list[h] = base64.urlsafe_b64encode(enc)
-    if errored:
-        parser.exit(1, "Key validation failed\n")
+        src_key_list[k[0].hex()] = base64.urlsafe_b64encode(enc)
+
+    for k in dest_keys:
+        enc = k[1].encrypt(
+            aes_key,
+            padding.OAEP(
+                mgf=padding.MGF1(algorithm=dest_hash),
+                algorithm=dest_hash, label=None
+            )
+        )
+        # encrypt decryption key
+        dest_key_list[k[0].hex()] = base64.urlsafe_b64encode(enc)
     ctx = AESGCM(aes_key)
     blob = ctx.encrypt(
         nonce, b"Type: message\n\n%b" % (
             blob
         )
     )
+    # remove raw as we parse html
+    src_create = merge_get_url(
+        replace_action(url, "add/MessageContent/"), raw=None
+    )
+    response = s.get(
+        src_create, headers={
+            "X-TOKEN": argv.token
+        }
+    )
+    if not response.ok:
+        logging.error("Creation failed: %s", response.text)
+        parser.exit(1, "Creation failed: %s" % response.text)
+    g = Graph()
+    g.parse(data=response.content, format="html")
     # create message object
     response = s.post(
-        url_create, body={
+        src_create, body={
+            "csrftoken": g.value(predictate="csrftoken"),
             "own_hash": pkey_hash,
             "key_list": src_key_list,
             "encrypted_content": io.BytesIO(
                 b"%b\0%b" % (nonce, blob)
             )
+        }, headers={
+            "X-TOKEN": argv.token
         }
     )
     response_dest = s.post(
@@ -502,8 +427,9 @@ def main(argv):
         digest.update(pem_public)
         pkey_hash = digest.finalize().hex()
         argv.attestation.add(own_url.split("?", 1)[0], [pkey_hash])
+        src_keys = None
         if argv.action != "check":
-            result_own = argv.attestation.check(
+            result_own, errored, src_keys = argv.attestation.check(
                 own_url.split("?", 1)[0],
                 map(
                     lambda x: (x["key"], x["signature"]),
@@ -527,7 +453,9 @@ def main(argv):
             )
 
         if argv.action == "send":
-            return action_send(argv, access, pkey, pkey_hash, s, response)
+            return action_send(
+                argv, access, pkey, pkey_hash, s, response, src_keys
+            )
         elif argv.action in {"view", "peek"}:
             return action_view(argv, access, pkey, pkey_hash, s, response)
         elif argv.action == "check":

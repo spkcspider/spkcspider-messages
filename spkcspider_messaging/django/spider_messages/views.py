@@ -1,9 +1,6 @@
 __all__ = ("ReferenceView", "MessageContentView")
 
-import re
-
-from django.conf import settings
-from django.http import Http404, JsonResponse, HttpResponse
+from django.http import Http404, HttpResponsePermanentRedirect, HttpResponse
 from django.shortcuts import get_object_or_404
 
 from django.views.decorators.csrf import csrf_exempt
@@ -25,7 +22,6 @@ _empty_set = frozenset()
 class ReferenceView(UserTestMixin, View):
     model = WebReference
     form_class = ReferenceForm
-    extract_pupkeyhash = re.compile("\x1epubkeyhash=([^\x1e=]+)=([^\x1e=]+)")
 
     @method_decorator(csrf_exempt)
     def dispatch(self, request, *args, **kwargs):
@@ -64,25 +60,11 @@ class ReferenceView(UserTestMixin, View):
         return ret
 
     def get(self):
-        """ Return tokens """
-        return JsonResponse(
-            {
-                "hash_algorithm": settings.SPIDER_HASH_ALGORITHM.name,
-                "keys": {
-                    (
-                        self.extract_pupkeyhash.search(
-                            k.key.associated.info
-                        ).group(2),
-                        {
-                            "key": k.key.key,
-                            "signature": k.signature
-                        }
-                    )
-                    for k in self.object.key_infos.prefetch(
-                        "associated_rel"
-                    ).all()
-                }
-            }
+        """ Return redirect """
+        return HttpResponsePermanentRedirect(
+            "?".format([
+                self.object.get_absolute_url(), self.request.GET.urlencode()
+            ])
         )
 
     def post(self, request, *args, **kwargs):

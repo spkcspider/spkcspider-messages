@@ -111,10 +111,10 @@ class PostBoxForm(forms.ModelForm):
         "message_list", "signatures"
     ]
 
-    def __init__(self, scope, **kwargs):
+    def __init__(self, scope, request, **kwargs):
         super().__init__(**kwargs)
         self.initial["hash_algorithm"] = settings.SPIDER_HASH_ALGORITHM.name
-        if scope in {"view", "raw"}:
+        if scope in {"view", "raw"} and request.is_owner:
             self.initial["message_list"] = [
                 {
                     "id": i.id,

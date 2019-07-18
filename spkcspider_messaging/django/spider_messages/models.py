@@ -174,6 +174,7 @@ class PostBox(BaseContent):
     def get_form_kwargs(self, **kwargs):
         ret = super().get_form_kwargs(**kwargs)
         ret["scope"] = kwargs["scope"]
+        ret["request"] = kwargs["request"]
         return ret
 
     def get_form(self, scope):

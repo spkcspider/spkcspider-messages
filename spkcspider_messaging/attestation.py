@@ -9,8 +9,8 @@ from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.backends import default_backend
-from cryptography.hazmat.primitives.serialization import load_pem_public_key
-from cryptography.x509 import load_pem_x509_certificate
+
+from .keys import load_public_key
 
 
 class AttestationResult(enum.IntEnum):
@@ -20,29 +20,6 @@ class AttestationResult(enum.IntEnum):
     error = 3
 
 
-def _load_public_key(key):
-    defbackend = default_backend()
-    if isinstance(key, str):
-        key = key.encode("utf8")
-    elif hasattr(key, "public_bytes"):
-        return key
-    elif hasattr(key, "public_key"):
-        return key.public_key()
-    if isinstance(key, str):
-        key = key.encode("utf8")
-    try:
-        return load_pem_x509_certificate(
-            key, defbackend
-        ).public_key()
-    except ValueError:
-        try:
-            return load_pem_public_key(
-                key, defbackend
-            )
-        except ValueError:
-            raise
-
-
 def _extract_hash_key2(val, algo=None):
     key = None
     signature = None
@@ -50,12 +27,12 @@ def _extract_hash_key2(val, algo=None):
         v = val[0]
         if len(val) >= 2:
             try:
-                key = _load_public_key(val[1])
+                key = load_public_key(val[1])
             except ValueError:
                 if len(val) >= 3:
                     raise
                 # activate second pattern
-                v = _load_public_key(val[0])
+                v = load_public_key(val[0])
                 signature = val[1]
         if len(val) >= 3:
             signature = val[2]
@@ -150,7 +127,7 @@ class AttestationChecker(object):
         self.con.close()
 
     @classmethod
-    def calc_attestation(cls, key_list, algo):
+    def calc_attestation(cls, key_list, algo, embed=False):
         """
             key_hashes:
                 string/bytes: hashes
@@ -160,15 +137,20 @@ class AttestationChecker(object):
                     use hash of key
         """
         hasher = hashes.Hash(algo, backend=default_backend())
-        for digest in sorted(map(
-            lambda x: _extract_only_hash(x, algo),
-            key_list
-        )):
+        if not embed:
+            def func(x):
+                return _extract_only_hash(x, algo)
+        else:
+            def func(x):
+                return x[0]
+        for digest in sorted(map(func, key_list)):
             hasher.update(digest)
         return hasher.finalize()
 
     @classmethod
-    def check_signatures(cls, key_hashes, algo=None, attestation=None):
+    def check_signatures(
+        cls, key_hashes, algo=None, attestation=None, embed=False
+    ):
         """
             attestation: provide attestation instead of generating it again
             key_hashes:
@@ -177,12 +159,13 @@ class AttestationChecker(object):
                 triples (hash, key, signature):
                     hash provided as first argument (more efficient)
         """
-        key_hashes = [
-             _extract_hash_key(x, algo) for x in key_hashes
-        ]
+        if not embed:
+            key_hashes = [
+                 _extract_hash_key(x, algo) for x in key_hashes
+            ]
 
         if not attestation and algo:
-            attestation = cls.calc_attestation(key_hashes, algo)
+            attestation = cls.calc_attestation(key_hashes, algo, embed=True)
         elif isinstance(attestation, str):
             attestation = base64.urlsafe_b64decode(attestation)
         elif not attestation:
@@ -205,10 +188,11 @@ class AttestationChecker(object):
             except (InvalidSignature, ValueError):
                 errored.append(entry)
                 continue
-        return (attestation, errored)
+        return (attestation, errored, key_hashes)
 
     def add(
-        self, domain, hash_keys, attestation=None, algo=None, _cur=None
+        self, domain, hash_keys, attestation=None, algo=None, _cur=None,
+        embed=False
     ):
         """
             attestation: provide attestation instead of generating it again
@@ -219,14 +203,15 @@ class AttestationChecker(object):
                 pairs (key, signature): calc hash
                 triples (hash, key, signature): use hash
         """
-        hash_keys = list(map(
-            lambda x: _extract_hash_key(x, algo, not _cur),
-            hash_keys
-        ))
+        # _cur is used if embedding in check
+        if not embed:
+            hash_keys = [
+                _extract_hash_key(x, algo, not _cur) for x in hash_keys
+            ]
         if isinstance(attestation, str):
             attestation = base64.urlsafe_b64decode(attestation)
         elif not attestation and algo:
-            attestation = self.calc_attestation(hash_keys, algo)
+            attestation = self.calc_attestation(hash_keys, algo, embed=True)
         if _cur:
             cursor = _cur
         else:
@@ -251,9 +236,11 @@ class AttestationChecker(object):
             VALUES(?, ?);
         """, zip(repeat(domainid), map(lambda x: x[0], hash_keys)))
         self.con.commit()
+        return hash_keys
 
     def check(
-        self, domain, hash_keys, attestation=None, algo=None, auto_add=True
+        self, domain, hash_keys, attestation=None, algo=None, auto_add=True,
+        embed=False
     ):
         """
             attestation: provide attestation
@@ -261,23 +248,22 @@ class AttestationChecker(object):
                 pairs (key, signature): check also signature
                 triples (hash, key, signature): check signature, recalc
         """
-        hash_keys = list(map(
-            lambda x: _extract_hash_key(x, algo, True),
-            hash_keys
-        ))
-        errors = []
+        if not embed:
+            hash_keys = [
+                _extract_hash_key(x, algo, True) for x in hash_keys
+            ]
         only_hashes = set(map(lambda x: x[0], hash_keys))
         if isinstance(attestation, str):
             attestation = base64.urlsafe_b64decode(attestation)
         elif not attestation and algo:
-            attestation = self.calc_attestation(hash_keys, algo)
+            attestation = self.calc_attestation(hash_keys, algo, embed=True)
 
         if attestation:
-            errors = self.check_signatures(
-                hash_keys, attestation=attestation
-            )[1]
-            if errors:
-                return AttestationResult.error
+            result = self.check_signatures(
+                hash_keys, attestation=attestation, embed=True
+            )
+            if result[1]:
+                return result
 
         domain_row = self.con.execute("""
             SElECT id, attestation FROM domain WHERE url=?
@@ -285,11 +271,13 @@ class AttestationChecker(object):
         if not domain_row:
             if auto_add:
                 self.add(domain, hash_keys, attestation=attestation)
-                return AttestationResult.domain_unknown
+                return (
+                    AttestationResult.domain_unknown, [], hash_keys
+                )
             else:
-                return AttestationResult.error
+                return (AttestationResult.error, [], hash_keys)
         if attestation and domain_row[1] == attestation:
-            return AttestationResult.success
+            return (AttestationResult.success, [], hash_keys)
 
         # hack lists
         old_hashes = self.con.execute("""
@@ -299,9 +287,9 @@ class AttestationChecker(object):
         )
         old_hashes = set(map(lambda x: x[0], old_hashes.fetchall()))
         if len(old_hashes) == 0:
-            return AttestationResult.error
+            return (AttestationResult.error, [], hash_keys)
         if old_hashes == only_hashes:
-            return AttestationResult.success
+            return (AttestationResult.success, [], hash_keys)
         if auto_add:
             # hack lists
             _cur = self.con.cursor()
@@ -312,11 +300,11 @@ class AttestationChecker(object):
             )
             if only_hashes.issubset(old_hashes):
                 self.con.commit()
-                return AttestationResult.success
+                return (AttestationResult.success, [], hash_keys)
             self.add(
                 domain, only_hashes.difference(old_hashes),
-                attestation=attestation, _cur=_cur
+                attestation=attestation, _cur=_cur, embed=True
             )
         if only_hashes.issubset(old_hashes):
-            return AttestationResult.success
-        return AttestationResult.partial_success
+            return (AttestationResult.success, [], hash_keys)
+        return (AttestationResult.partial_success, [], hash_keys)
