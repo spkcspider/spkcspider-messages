@@ -1,6 +1,14 @@
 {
   "private": true,
   "dependencies": {
-    "spkcspider": "git+https://github.com/spkcspider/spkcspider.git"
+    "@bevacqua/rome": "*",
+    "@fortawesome/fontawesome-free": "*",
+    "@json-editor/json-editor": "*",
+    "base64-js": "*",
+    "jquery": "*",
+    "qrcode-generator": "*",
+    "selectize": "*",
+    "trumbowyg": "*",
+    "w3-css": "*"
   }
 }
