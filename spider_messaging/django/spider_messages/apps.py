@@ -10,7 +10,7 @@ from .signals import (
 
 
 class SpiderMessagesConfig(AppConfig):
-    name = 'spkcspider_messaging.django.spider_messages'
+    name = 'spider_messaging.django.spider_messages'
     label = 'spider_messages'
     verbose_name = 'spkcspider Messages'
     spider_url_path = 'spidermessages/'

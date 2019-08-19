@@ -12,12 +12,14 @@ from django import forms
 from django.urls import reverse
 from django.utils.translation import gettext as _
 
-from spkcspider_messaging.constants import ReferenceType
-from spkcspider.apps.spider.conf import get_anchor_domain, get_anchor_scheme
-from spkcspider.apps.spider.helpers import get_hashob
-from spkcspider.apps.spider.fields import JsonField
-from .widgets import SignatureWidget, MessageListWidget
 
+from spkcspider.apps.spider.conf import get_anchor_domain, get_anchor_scheme
+from spkcspider.utils.security import get_hashob
+from spkcspider.apps.spider.fields import JsonField
+
+from spider_messaging.constants import ReferenceType
+
+from .widgets import SignatureWidget, MessageListWidget
 from .models import WebReference, PostBox, MessageContent
 
 

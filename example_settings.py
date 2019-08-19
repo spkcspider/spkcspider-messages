@@ -10,7 +10,7 @@ INSTALLED_APPS += [
     'spkcspider.apps.spider_keys',
     'spkcspider.apps.spider_tags',
     'spkcspider.apps.spider_webcfg',
-    'spkcspider_messaging.django.spider_messages'
+    'spider_messaging.django.spider_messages'
 
 ]
 # SECURITY WARNING: don't run with debug turned on in production!

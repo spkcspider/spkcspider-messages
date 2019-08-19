@@ -25,15 +25,15 @@ from jsonfield import JSONField
 from rdflib import Literal, BNode, RDF
 import requests
 
-from spkcspider.apps.spider.helpers import (
-    merge_get_url, get_requests_params, create_b64_token, add_property
-)
-from spkcspider.apps.spider.contents import BaseContent, add_content
-from spkcspider.apps.spider.conf import TOKEN_SIZE
-from spkcspider.apps.spider.helpers import literalize
-from spkcspider.apps.spider.constants import VariantType, ActionUrl, spkcgraph
+from spkcspider.utils.urls import merge_get_url
+from spkcspider.utils.security import create_b64_token
+from spkcspider.utils.fields import add_property, literalize
+from spkcspider.constants import VariantType, ActionUrl, spkcgraph
 
-from spkcspider_messaging.constants import ReferenceType
+from spkcspider.apps.spider.contents import BaseContent, add_content
+from spkcspider.apps.spider.conf import TOKEN_SIZE, get_requests_params
+
+from spider_messaging.constants import ReferenceType
 
 from .http import CbFileResponse
 
@@ -183,6 +183,7 @@ class PostBox(BaseContent):
 
     @csrf_exempt
     def access_view(self, **kwargs):
+        # TODO: needs implementation of domain auth
         return super().access_view(**kwargs)
 
     @csrf_exempt

@@ -3,7 +3,7 @@
 from django.db import migrations, models
 import django.db.models.deletion
 import jsonfield.fields
-import spkcspider_messaging.django.spider_messages.models
+import spider_messaging.django.spider_messages.models
 
 
 class Migration(migrations.Migration):
@@ -19,7 +19,7 @@ class Migration(migrations.Migration):
             name='MessageContent',
             fields=[
                 ('id', models.BigAutoField(editable=False, primary_key=True, serialize=False)),
-                ('encrypted_content', models.FileField(null=True, upload_to=spkcspider_messaging.django.spider_messages.models.get_send_content_path)),
+                ('encrypted_content', models.FileField(null=True, upload_to=spider_messaging.django.spider_messages.models.get_send_content_path)),
                 ('key_list', jsonfield.fields.JSONField(blank=True, default=dict, help_text='Own encrypted keys')),
             ],
             options={
@@ -46,7 +46,7 @@ class Migration(migrations.Migration):
                 ('url', models.URLField(max_length=600)),
                 ('rtype', models.CharField(max_length=1)),
                 ('created', models.DateTimeField(auto_now_add=True)),
-                ('cached_content', models.FileField(blank=True, upload_to=spkcspider_messaging.django.spider_messages.models.get_cached_content_path)),
+                ('cached_content', models.FileField(blank=True, upload_to=spider_messaging.django.spider_messages.models.get_cached_content_path)),
                 ('cached_size', models.PositiveIntegerField(blank=True, null=True)),
                 ('key_list', jsonfield.fields.JSONField(help_text='encrypted keys for content')),
                 ('postbox', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='references', to='spider_messages.PostBox')),

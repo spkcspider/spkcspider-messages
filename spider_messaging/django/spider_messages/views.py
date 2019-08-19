@@ -8,7 +8,7 @@ from django.utils.decorators import method_decorator
 from django.views import View
 
 from spkcspider.apps.spider.views import UserTestMixin
-from spkcspider.apps.spider.helpers import get_settings_func
+from spkcspider.utils.settings import get_settings_func
 from spkcspider.apps.spider.models import (
     AuthToken, AssignedContent
 )

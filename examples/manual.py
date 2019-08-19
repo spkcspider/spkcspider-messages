@@ -6,6 +6,7 @@ import argparse
 import logging
 import base64
 import json
+from urllib.parse import parse_qs
 # import re
 
 import requests
@@ -16,13 +17,14 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 from rdflib import Graph, XSD, Literal
 
-from spkcspider.apps.spider.helpers import merge_get_url
-from spkcspider.apps.spider.constants import static_token_matcher, spkcgraph
-from spkcspider_messaging.constants import ReferenceType
-from spkcspider_messaging.attestation import (
+from spkcspider.utils.urls import merge_get_url
+from spkcspider.constants import static_token_matcher, spkcgraph
+
+from spider_messaging.constants import ReferenceType
+from spider_messaging.attestation import (
     AttestationChecker, AttestationResult
 )
-from spkcspider_messaging.keys import load_priv_key
+from spider_messaging.keys import load_priv_key
 
 
 logger = logging.getLogger(__name__)
@@ -73,39 +75,54 @@ def replace_action(url, action):
     )
 
 
-def action_send(argv, access, pkey, pkey_hash, s, response, src_keys):
+def action_send(argv, pkey, pkey_hash, session, response, src_keys):
     g = Graph()
     g.parse(data=response.content, format="turtle")
-    url = g.value(
+    component_url = g.value(
         predicate=spkcgraph["create:name"], object=Literal(
             "MessageContent", datatype=XSD.string
         )
     )
-    if not url:
+    if not component_url:
         parser.exit(1, "Source does not support action, logged in?\n")
-    url = merge_get_url(url, raw="true")
-    response_dest = s.get(
-        merge_get_url(argv.dest, raw="embed",)
-    )
+
+    component_url = merge_get_url(component_url, raw="true")
+    # TODO: Postbox needs domainauth support, fix referrer
+    token = parse_qs(argv.dest.split("?", 1)[-1]).get("token", None)
+    if token:
+        response_dest = session.get(
+            merge_get_url(argv.dest, raw="embed")
+        )
+    else:
+        response_dest = session.get(
+            merge_get_url(
+                argv.dest, raw="embed", referrer=str(argv.postbox_base),
+                intention="domain"
+            )
+        )
+        if token:
+            token = parse_qs(token.split("?", 1)[-1]).get("token", None)
     if not response_dest.ok:
-        logging.info("Dest returned error: %s", response_dest.text)
-        parser.exit(1, "url invalid\n")
+        logger.info("Dest returned error: %s", response_dest.text)
+        parser.exit(1, "retrieval failed, invalid url?\n")
     dest = {}
     g_dest = Graph()
     g_dest.parse(data=response.content, format="turtle")
-    dest_create = g_dest.value(
+
+    dest_create_ref = g_dest.value(
         predicate=spkcgraph["feature:name"],
-        object=Literal(
-            "webrefpush", datatype=XSD.string
-        )
+        object=Literal("webrefpush", datatype=XSD.string)
     )
-    if not dest_create:
+    dest_create_ref = merge_get_url(dest_create_ref, token=token)
+    print(dest_create_ref, token)
+    # needs explicit token
+    if not dest_create_ref:
         parser.exit(1, "dest does not support webrefpush feature\n")
-    response_dest = s.get(
-        merge_get_url(dest_create, raw="embed",)
+    response_dest = session.get(
+        merge_get_url(dest_create_ref, raw="embed")
     )
     if not response_dest.ok:
-        logging.info("Dest returned error: %s", response_dest.text)
+        logger.info("Dest returned error: %s", response_dest.text)
         parser.exit(1, "url invalid\n")
     g_dest = Graph()
     g_dest.parse(data=response_dest.content, format="turtle")
@@ -143,9 +160,7 @@ def action_send(argv, access, pkey, pkey_hash, s, response, src_keys):
         algo=dest_hash
     )
     if result_dest != AttestationResult.success:
-        logging.critical(
-            "Dest base url contains invalid keys."
-        )
+        logger.critical("Dest base url contains invalid keys.")
         parser.exit(1, "dest contains invalid keys\n")
 
     blob = sys.stdin.read()
@@ -181,22 +196,22 @@ def action_send(argv, access, pkey, pkey_hash, s, response, src_keys):
         )
     )
     # remove raw as we parse html
-    src_create = merge_get_url(
-        replace_action(url, "add/MessageContent/"), raw=None
+    message_create_url = merge_get_url(
+        replace_action(component_url, "add/MessageContent/"), raw=None
     )
-    response = s.get(
-        src_create, headers={
+    response = session.get(
+        message_create_url, headers={
             "X-TOKEN": argv.token
         }
     )
     if not response.ok:
-        logging.error("Creation failed: %s", response.text)
+        logger.error("Creation failed: %s", response.text)
         parser.exit(1, "Creation failed: %s" % response.text)
     g = Graph()
     g.parse(data=response.content, format="html")
     # create message object
-    response = s.post(
-        src_create, body={
+    response = session.post(
+        message_create_url, body={
             "csrftoken": g.value(predictate="csrftoken"),
             "own_hash": pkey_hash,
             "key_list": src_key_list,
@@ -207,8 +222,8 @@ def action_send(argv, access, pkey, pkey_hash, s, response, src_keys):
             "X-TOKEN": argv.token
         }
     )
-    response_dest = s.post(
-        dest_create, body={
+    response_dest = session.post(
+        dest_create_ref, body={
             "url": response.url,
             "rtype": ReferenceType.message,
             "key_list": dest_key_list
@@ -216,8 +231,8 @@ def action_send(argv, access, pkey, pkey_hash, s, response, src_keys):
     )
 
 
-def action_view(argv, access, pkey, pkey_hash, s, response):
-    if access == "ref":
+def action_view(argv, pkey, pkey_hash, session, response):
+    if argv.access_type == "ref":
         key_list = json.loads(response.headers["X-KEYLIST"])
         key = key_list.get("keyhash", None)
         if not key:
@@ -242,8 +257,8 @@ def action_view(argv, access, pkey, pkey_hash, s, response):
             """
                 SELECT DISTINCT ?base ?name ?value
                 WHERE {
-                    ?a spkc:name ?message_list .
-                    ?a spkc:value ?base .
+                    ?property spkc:name ?message_list .
+                    ?property spkc:value ?base .
                     ?base spkc:name ?name .
                     ?base spkc:value ?value .
                 }
@@ -267,7 +282,7 @@ def action_view(argv, access, pkey, pkey_hash, s, response):
         # view
 
 
-def action_check(argv, access, pkey, pkey_hash, s, response, verb=True):
+def action_check(argv, pkey, pkey_hash, session, response, verb=True):
     src = {}
 
     g = Graph()
@@ -334,7 +349,7 @@ def main(argv):
         parser.exit(1, "key does not exist\n")
     match = static_token_matcher.match(argv.url)
     if not match:
-        parser.exit(1, "invalid url\n")
+        parser.exit(1, "invalid url scheme\n")
     if argv.verbose >= 2:
         logger.setLevel(logging.DEBUG)
     elif argv.verbose >= 1:
@@ -360,13 +375,15 @@ def main(argv):
     if argv.action == "send":
         match2 = static_token_matcher.match(argv.dest)
         if not match2:
-            parser.exit(1, "invalid url\n")
+            parser.exit(1, "invalid url scheme\n")
         access2 = match2.groupdict()["access"]
         if (
             access not in {"list", "view"} or
             access2 not in {"list", "view"}
         ):
             parser.exit(1, "url doesn't match action\n")
+
+    argv.access_type = access
 
     with open(argv.key, "rb") as f:
         pkey = load_priv_key(f.read())[0]
@@ -389,8 +406,8 @@ def main(argv):
             "X-TOKEN": argv.token
         })
         if not response.ok:
-            logging.info("Url returned error: %s\n", response.text)
-            parser.exit(1, "url invalid\n")
+            logger.info("Url returned error: %s\n", response.text)
+            parser.exit(1, "retrieval failed, invalid url?\n")
 
         g = Graph()
         g.parse(data=response.content, format="turtle")
@@ -399,10 +416,11 @@ def main(argv):
         for i in g.query(
             """
                 SELECT
-                ?postbox_value ?postbox_value ?key_name ?key_value
+                ?postbox ?postbox_value ?postbox_value ?key_name ?key_value
                 WHERE {
-                    ?base spkc:name ?postbox_name .
-                    ?base spkc:value ?postbox_value .
+                    ?postbox spkc:properties ?property .
+                    ?property spkc:name ?postbox_name .
+                    ?property spkc:value ?postbox_value .
                     ?postbox_value spkc:properties ?key_base_prop .
                     ?key_base_prop spkc:name ?key_name .
                     ?key_base_prop spkc:value ?key_value .
@@ -415,6 +433,7 @@ def main(argv):
                 )
             }
         ):
+            argv.postbox_base = i.postbox
             src.setdefault(str(i.postbox_value), {})
             src[str(i.postbox_value)][str(i.key_name)] = i.key_value
 
@@ -438,7 +457,7 @@ def main(argv):
                 algo=argv.src_hash_algo
             )
             if result_own != AttestationResult.success:
-                logging.critical(
+                logger.critical(
                     "Home base url contains invalid keys, hacked?"
                 )
                 parser.exit(1, "invalid keys\n")
@@ -454,12 +473,14 @@ def main(argv):
 
         if argv.action == "send":
             return action_send(
-                argv, access, pkey, pkey_hash, s, response, src_keys
+                argv, pkey, pkey_hash, s, response, src_keys
             )
         elif argv.action in {"view", "peek"}:
-            return action_view(argv, access, pkey, pkey_hash, s, response)
+            return action_view(
+                argv, pkey, pkey_hash, s, response
+            )
         elif argv.action == "check":
-            ret = action_check(argv, access, pkey, pkey_hash, s, response)
+            ret = action_check(argv, pkey, pkey_hash, s, response)
             if ret is not True:
                 parser.exit(2, "check failed: %s\n" % ret)
 
