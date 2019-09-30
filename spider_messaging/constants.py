@@ -10,3 +10,7 @@ class ReferenceType(str, enum.Enum):
     message = "b"
     # rdf file with proposed content(s)
     content = "c"
+
+    def __str__(self):
+        # output value instead of member name
+        return self.value

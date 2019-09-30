@@ -14,7 +14,8 @@ cryptography = "*"
 
 
 [tool.poetry.dev-dependencies]
-spkcspider = ">=0.12"
+spkcspider = ">=0.17"
+spkcspider-domainauth = ">=0.4"
 django-extensions = "*"
 twisted = "*"
 pyOpenSSL = "*"
@@ -22,8 +23,8 @@ service_identity = "*"
 
 
 [tool.poetry.extras]
-django = ["spkcspider>=0.8"]
-test = ["spkcspider[test]>=0.8"]
+django = ["spkcspider>=0.18"]
+test = ["spkcspider[test]>=0.18", "spkcspider-domainauth>=0.4"]
 email = ["twisted", "service_identity", "pyOpenSSL"]
 
 [tool.tox]

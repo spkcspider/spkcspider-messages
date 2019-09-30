@@ -1,7 +1,6 @@
-__all__ = ("ReferenceView", "MessageContentView")
+__all__ = ("MessageContentView",)
 
-from django.http import Http404, HttpResponsePermanentRedirect, HttpResponse
-from django.shortcuts import get_object_or_404
+from django.http import Http404
 
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
@@ -9,77 +8,12 @@ from django.views import View
 
 from spkcspider.apps.spider.views import UserTestMixin
 from spkcspider.utils.settings import get_settings_func
-from spkcspider.apps.spider.models import (
-    AuthToken, AssignedContent
-)
-from .models import WebReference, MessageContent
+from spkcspider.apps.spider.models import AssignedContent
+
+from .models import MessageContent
 from .http import CbFileResponse
-from .forms import ReferenceForm
 
 _empty_set = frozenset()
-
-
-class ReferenceView(UserTestMixin, View):
-    model = WebReference
-    form_class = ReferenceForm
-
-    @method_decorator(csrf_exempt)
-    def dispatch(self, request, *args, **kwargs):
-        try:
-            request.auth_token = get_object_or_404(
-                AuthToken, token=request.GET.get("token", "")
-            )
-            obj = self.get_object()
-            self.usercomponent = obj.usercomponent
-            self.object = obj.content
-            return super().dispatch(request, *args, **kwargs)
-        except Http404:
-            return get_settings_func(
-                "SPIDER_RATELIMIT_FUNC",
-                "spkcspider.apps.spider.functions.rate_limit_default"
-            )(self, request)
-
-    def get_object(self):
-        try:
-            return AssignedContent.objects.from_token(
-                self.request.auth_token, variant="PostBox"
-            )
-        except AssignedContent.ModelDoesNotExist:
-            raise Http404()
-
-    def test_func(self):
-        if self.object.only_persistent:
-            if self.request.auth_token.persist < 0:
-                return False
-        return True
-
-    def options(self, request, *args, **kwargs):
-        ret = super().options()
-        ret["Access-Control-Allow-Origin"] = "*"
-        ret["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
-        return ret
-
-    def get(self):
-        """ Return redirect """
-        return HttpResponsePermanentRedirect(
-            "?".format([
-                self.object.get_absolute_url(), self.request.GET.urlencode()
-            ])
-        )
-
-    def post(self, request, *args, **kwargs):
-        """ create new message reference """
-        form = self.form_class(
-            instance=WebReference(postbox=self.object),
-            create=True,
-            data=self.request.POST,
-            files=self.request.FILES,
-        )
-
-        if form.is_valid():
-            form.save()
-            return HttpResponse(status=201)
-        return HttpResponse(status=400)
 
 
 class MessageContentView(UserTestMixin, View):
@@ -97,7 +31,7 @@ class MessageContentView(UserTestMixin, View):
             return get_settings_func(
                 "SPIDER_RATELIMIT_FUNC",
                 "spkcspider.apps.spider.functions.rate_limit_default"
-            )(self, request)
+            )(request, self)
 
     def get_object(self):
         try:

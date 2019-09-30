@@ -8,7 +8,6 @@ import logging
 
 
 from django.db import models
-from django.urls import reverse
 
 from django.http import HttpResponse, HttpResponsePermanentRedirect
 from django.conf import settings
@@ -28,7 +27,7 @@ import requests
 from spkcspider.utils.urls import merge_get_url
 from spkcspider.utils.security import create_b64_token
 from spkcspider.utils.fields import add_property, literalize
-from spkcspider.constants import VariantType, ActionUrl, spkcgraph
+from spkcspider.constants import VariantType, spkcgraph
 
 from spkcspider.apps.spider.contents import BaseContent, add_content
 from spkcspider.apps.spider.conf import TOKEN_SIZE, get_requests_params
@@ -93,7 +92,7 @@ class PostBox(BaseContent):
             "name": "PostBox",
             "ctype": (
                 VariantType.unique + VariantType.component_feature +
-                VariantType.feature_connect + VariantType.domain_mode
+                VariantType.feature_connect
             ),
             "strength": 0
         },
@@ -159,12 +158,6 @@ class PostBox(BaseContent):
     def get_priority(self):
         return 2
 
-    @classmethod
-    def feature_urls(cls, name):
-        return [
-            ActionUrl("webrefpush", reverse("spider_messages:webreference"))
-        ]
-
     def get_strength_link(self):
         return 11
 
@@ -181,13 +174,39 @@ class PostBox(BaseContent):
         from .forms import PostBoxForm as f
         return f
 
+    def get_abilities(self, context):
+        if context["request"].is_owner:
+            return {"push_webref", "get_webref", "del_webref"}
+        if (
+            not self.only_persistent or
+            context["request"].auth_token.persist >= 0
+        ):
+            return {"push_webref"}
+        return set()
+
     @csrf_exempt
     def access_view(self, **kwargs):
-        # TODO: needs implementation of domain auth
         return super().access_view(**kwargs)
 
     @csrf_exempt
-    def access_ref(self, **kwargs):
+    def access_webrefpush(self, request, **kwargs):
+        from .forms import ReferenceForm
+        if request.method == "GET":
+            return super().access_view(**kwargs)
+        form = ReferenceForm(
+            instance=WebReference(postbox=self),
+            create=True,
+            data=self.request.POST,
+            files=self.request.FILES,
+        )
+
+        if form.is_valid():
+            form.save()
+            return HttpResponse(status=201)
+        return HttpResponse(status=400)
+
+    @csrf_exempt
+    def access_getref(self, **kwargs):
         ref = self.references.filter(
             id=kwargs["request"].GET.get("reference")
         ).first()
@@ -245,13 +264,13 @@ class WebReference(models.Model):
             special "access", don't confuse with the one of BaseContent
         """
         assert len(self.key_list) > 0
-        if self.rtype == ReferenceType.message.value:
+        if self.rtype == ReferenceType.message:
             kwargs["rtype"] = ReferenceType.message
             return self.access_message(kwargs)
-        elif self.rtype == ReferenceType.redirect.value:
+        elif self.rtype == ReferenceType.redirect:
             kwargs["rtype"] = ReferenceType.redirect
             return self.access_redirect(kwargs)
-        elif self.rtype == ReferenceType.content.value:
+        elif self.rtype == ReferenceType.content:
             kwargs["rtype"] = ReferenceType.content
             return self.access_message(kwargs)
         return HttpResponse(status=501)

@@ -53,7 +53,7 @@ class ReferenceForm(forms.ModelForm):
 
     def _save_m2m(self):
         super()._save_m2m()
-        if self.create and self.instance.rtype != ReferenceType.content.value:
+        if self.create and self.instance.rtype != ReferenceType.content:
             for h in self.instance.key_list.keys():
                 self.instance.copies.create(keyhash=h)
 

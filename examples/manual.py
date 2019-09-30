@@ -6,7 +6,6 @@ import argparse
 import logging
 import base64
 import json
-from urllib.parse import parse_qs
 # import re
 
 import requests
@@ -85,23 +84,10 @@ def action_send(argv, pkey, pkey_hash, session, response, src_keys):
     )
     if not component_url:
         parser.exit(1, "Source does not support action, logged in?\n")
-
     component_url = merge_get_url(component_url, raw="true")
-    # TODO: Postbox needs domainauth support, fix referrer
-    token = parse_qs(argv.dest.split("?", 1)[-1]).get("token", None)
-    if token:
-        response_dest = session.get(
-            merge_get_url(argv.dest, raw="embed")
-        )
-    else:
-        response_dest = session.get(
-            merge_get_url(
-                argv.dest, raw="embed", referrer=str(argv.postbox_base),
-                intention="domain"
-            )
-        )
-        if token:
-            token = parse_qs(token.split("?", 1)[-1]).get("token", None)
+
+    dest_url = merge_get_url(argv.dest, raw="embed")
+    response_dest = session.get(dest_url)
     if not response_dest.ok:
         logger.info("Dest returned error: %s", response_dest.text)
         parser.exit(1, "retrieval failed, invalid url?\n")
@@ -109,17 +95,15 @@ def action_send(argv, pkey, pkey_hash, session, response, src_keys):
     g_dest = Graph()
     g_dest.parse(data=response.content, format="turtle")
 
-    dest_create_ref = g_dest.value(
-        predicate=spkcgraph["feature:name"],
-        object=Literal("webrefpush", datatype=XSD.string)
-    )
-    dest_create_ref = merge_get_url(dest_create_ref, token=token)
-    print(dest_create_ref, token)
-    # needs explicit token
-    if not dest_create_ref:
-        parser.exit(1, "dest does not support webrefpush feature\n")
+    if (
+        None,
+        spkcgraph["ability:name"],
+        Literal("push_webref", datatype=XSD.string)
+    ) not in g_dest:
+        parser.exit(1, "dest does not support push_webref ability\n")
+    webref_url = replace_action(dest_url, "push_webref/")
     response_dest = session.get(
-        merge_get_url(dest_create_ref, raw="embed")
+        merge_get_url(webref_url, raw="embed")
     )
     if not response_dest.ok:
         logger.info("Dest returned error: %s", response_dest.text)
@@ -223,7 +207,7 @@ def action_send(argv, pkey, pkey_hash, session, response, src_keys):
         }
     )
     response_dest = session.post(
-        dest_create_ref, body={
+        webref_url, body={
             "url": response.url,
             "rtype": ReferenceType.message,
             "key_list": dest_key_list
@@ -318,7 +302,7 @@ def action_check(argv, pkey, pkey_hash, session, response, verb=True):
             lambda x: (x["key"], x["signature"]),
             src.values()
         ), algo=src_hash
-    )
+    )[:2]
     tmp = list(g.query(
         """
             SELECT DISTINCT ?value
@@ -364,7 +348,7 @@ def main(argv):
         parser.exit(1, "url doesn't match action\n")
     if (
         argv.action in {"view", "peek"} and
-        access not in {"view", "ref", "list"}
+        access not in {"view", "get_webref", "list"}
     ):
         parser.exit(1, "url doesn't match action\n")
     if (
@@ -378,8 +362,8 @@ def main(argv):
             parser.exit(1, "invalid url scheme\n")
         access2 = match2.groupdict()["access"]
         if (
-            access not in {"list", "view"} or
-            access2 not in {"list", "view"}
+            access not in {"list", "view", "push_webref"} or
+            access2 not in {"list", "view", "push_webref"}
         ):
             parser.exit(1, "url doesn't match action\n")
 
@@ -483,6 +467,7 @@ def main(argv):
             ret = action_check(argv, pkey, pkey_hash, s, response)
             if ret is not True:
                 parser.exit(2, "check failed: %s\n" % ret)
+            print("check successful")
 
 
 if __name__ == "__main__":
