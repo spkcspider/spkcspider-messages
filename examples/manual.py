@@ -69,7 +69,7 @@ def replace_action(url, action):
             "/".join((
                 url[0].rstrip("/").rsplit("/", 1)[0], action.lstrip("/")
             )),
-            url[1]
+            url[1] if len(url) >= 2 else ""
         ]
     )
 
@@ -86,7 +86,7 @@ def action_send(argv, pkey, pkey_hash, session, response, src_keys):
         parser.exit(1, "Source does not support action, logged in?\n")
     component_url = merge_get_url(component_url, raw="true")
 
-    dest_url = merge_get_url(argv.dest, raw="embed")
+    dest_url = merge_get_url(argv.dest, raw="embed", info="_type=PostBox")
     response_dest = session.get(dest_url)
     if not response_dest.ok:
         logger.info("Dest returned error: %s", response_dest.text)
@@ -95,13 +95,14 @@ def action_send(argv, pkey, pkey_hash, session, response, src_keys):
     g_dest = Graph()
     g_dest.parse(data=response.content, format="turtle")
 
-    if (
-        None,
-        spkcgraph["ability:name"],
-        Literal("push_webref", datatype=XSD.string)
-    ) not in g_dest:
+    webref_url = g_dest.value(
+        predicate=spkcgraph["ability:name"],
+        object=Literal("push_webref", datatype=XSD.string)
+    )
+    if not webref_url:
         parser.exit(1, "dest does not support push_webref ability\n")
-    webref_url = replace_action(dest_url, "push_webref/")
+    print(webref_url)
+    webref_url = replace_action(webref_url, "push_webref/")
     response_dest = session.get(
         merge_get_url(webref_url, raw="embed")
     )

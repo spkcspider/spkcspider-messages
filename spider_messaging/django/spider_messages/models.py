@@ -189,7 +189,7 @@ class PostBox(BaseContent):
         return super().access_view(**kwargs)
 
     @csrf_exempt
-    def access_webrefpush(self, request, **kwargs):
+    def access_push_webref(self, request, **kwargs):
         from .forms import ReferenceForm
         if request.method == "GET":
             return super().access_view(**kwargs)
@@ -206,7 +206,7 @@ class PostBox(BaseContent):
         return HttpResponse(status=400)
 
     @csrf_exempt
-    def access_getref(self, **kwargs):
+    def access_get_webref(self, **kwargs):
         ref = self.references.filter(
             id=kwargs["request"].GET.get("reference")
         ).first()
@@ -214,7 +214,7 @@ class PostBox(BaseContent):
             return HttpResponse(status=410)
         return ref.access(kwargs)
 
-    def access_delref(self, **kwargs):
+    def access_del_webref(self, **kwargs):
         ret = self.references.filter(
             id__in=kwargs["request"].GET.get("reference")
         )
