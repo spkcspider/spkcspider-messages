@@ -189,15 +189,17 @@ class PostBox(BaseContent):
         return super().access_view(**kwargs)
 
     @csrf_exempt
-    def access_push_webref(self, request, **kwargs):
+    def access_push_webref(self, **kwargs):
         from .forms import ReferenceForm
-        if request.method == "GET":
-            return super().access_view(**kwargs)
+        if kwargs["request"].method == "GET":
+            if "raw" in kwargs["request"].GET:
+                return self.access_raw(**kwargs)
+            return self.access_view(**kwargs)
         form = ReferenceForm(
             instance=WebReference(postbox=self),
             create=True,
-            data=self.request.POST,
-            files=self.request.FILES,
+            data=kwargs["request"].POST,
+            files=kwargs["request"].FILES,
         )
 
         if form.is_valid():

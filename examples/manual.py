@@ -52,10 +52,22 @@ parser.add_argument(
     help='Postbox/Message'
 )
 subparsers = parser.add_subparsers(dest='action', required=True)
-subparsers.add_parser("view")
-subparsers.add_parser("peek")
+view_parser = subparsers.add_parser("view")
+view_parser.add_argument(
+    '--file', help='Use file instead stdout', type=argparse.FileType('wb'),
+    nargs="?", default=sys.stdout.buffer
+)
+peek_parser = subparsers.add_parser("peek")
+peek_parser.add_argument(
+    '--file', help='Use file instead stdout', type=argparse.FileType('wb'),
+    nargs="?", default=sys.stdout.buffer
+)
 subparsers.add_parser("check")
 send_parser = subparsers.add_parser("send")
+send_parser.add_argument(
+    '--file', help='Use file instead stdin', type=argparse.FileType('rb'),
+    nargs="?", default=sys.stdin.buffer
+)
 send_parser.add_argument(
     'dest', action="store", help='Destination url'
 )
@@ -75,9 +87,9 @@ def replace_action(url, action):
 
 
 def action_send(argv, pkey, pkey_hash, session, response, src_keys):
-    g = Graph()
-    g.parse(data=response.content, format="turtle")
-    component_url = g.value(
+    g_src = Graph()
+    g_src.parse(data=response.content, format="turtle")
+    component_url = g_src.value(
         predicate=spkcgraph["create:name"], object=Literal(
             "MessageContent", datatype=XSD.string
         )
@@ -101,7 +113,6 @@ def action_send(argv, pkey, pkey_hash, session, response, src_keys):
     )
     if not webref_url:
         parser.exit(1, "dest does not support push_webref ability\n")
-    print(webref_url)
     webref_url = replace_action(webref_url, "push_webref/")
     response_dest = session.get(
         merge_get_url(webref_url, raw="embed")
@@ -112,7 +123,7 @@ def action_send(argv, pkey, pkey_hash, session, response, src_keys):
     g_dest = Graph()
     g_dest.parse(data=response_dest.content, format="turtle")
 
-    for i in g.query(
+    for i in g_src.query(
         """
             SELECT
             ?postbox_value ?postbox_value ?key_name ?key_value
@@ -148,7 +159,7 @@ def action_send(argv, pkey, pkey_hash, session, response, src_keys):
         logger.critical("Dest base url contains invalid keys.")
         parser.exit(1, "dest contains invalid keys\n")
 
-    blob = sys.stdin.read()
+    blob = argv.file.read()
     aes_key = AESGCM.generate_key(bit_length=256)
     nonce = os.urandom(20)
     src_key_list = {}
@@ -162,7 +173,8 @@ def action_send(argv, pkey, pkey_hash, session, response, src_keys):
             )
         )
         # encrypt decryption key
-        src_key_list[k[0].hex()] = base64.urlsafe_b64encode(enc)
+        src_key_list[k[0].hex()] = \
+            base64.urlsafe_b64encode(enc).decode("ascii")
 
     for k in dest_keys:
         enc = k[1].encrypt(
@@ -173,12 +185,13 @@ def action_send(argv, pkey, pkey_hash, session, response, src_keys):
             )
         )
         # encrypt decryption key
-        dest_key_list[k[0].hex()] = base64.urlsafe_b64encode(enc)
+        dest_key_list[k[0].hex()] = \
+            base64.urlsafe_b64encode(enc).decode("ascii")
     ctx = AESGCM(aes_key)
     blob = ctx.encrypt(
         nonce, b"Type: message\n\n%b" % (
             blob
-        )
+        ), None
     )
     # remove raw as we parse html
     message_create_url = merge_get_url(
@@ -196,24 +209,26 @@ def action_send(argv, pkey, pkey_hash, session, response, src_keys):
     g.parse(data=response.content, format="html")
     # create message object
     response = session.post(
-        message_create_url, body={
-            "csrftoken": g.value(predictate="csrftoken"),
+        message_create_url, data={
+            "csrftoken": list(g.objects(predicate=spkcgraph["csrftoken"]))[0],
             "own_hash": pkey_hash,
-            "key_list": src_key_list,
+            "key_list": json.dumps(src_key_list),
             "encrypted_content": io.BytesIO(
                 b"%b\0%b" % (nonce, blob)
             )
         }, headers={
-            "X-TOKEN": argv.token
+            "X-TOKEN": argv.token  # only for src
         }
     )
+    response.raise_for_status()
     response_dest = session.post(
-        webref_url, body={
+        webref_url, data={
             "url": response.url,
             "rtype": ReferenceType.message,
-            "key_list": dest_key_list
+            "key_list": json.dumps(dest_key_list)
         }
     )
+    response_dest.raise_for_status()
 
 
 def action_view(argv, pkey, pkey_hash, session, response):
@@ -234,7 +249,7 @@ def action_view(argv, pkey, pkey_hash, session, response):
         nonce, content = response.content.split(b"\0", 1)
         blob = ctx.decrypt(nonce, content)
         headers, content = blob.split(b"\n\n", 1)
-        print(content)
+        argv.file.write(content)
     else:
         g = Graph()
         g.parse(data=response.content, format="turtle")
@@ -451,7 +466,7 @@ def main(argv):
         if argv.action == "view":
             response = s.post(
                 merge_get_url(argv.url, raw="embed"),
-                body={
+                data={
                     "keyhash": pkey_hash
                 }
             )
