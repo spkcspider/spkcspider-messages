@@ -37,14 +37,14 @@ class ReferenceForm(forms.ModelForm):
         ret = self.cleaned_data["key_list"]
         if isinstance(ret, str):
             ret = json.loads(ret)
-        q = Q()
+        q = Q(pk=self.instance.postbox.pk)
         for i in ret.keys():
-            q |= ~Q(
+            q &= Q(
                 keys__associated_rel__info__contains="\x1epubkeyhash=%s" %
                 i
             )
 
-        if self.model.objects.filter(q):
+        if PostBox.objects.filter(q):
             raise forms.ValidationError(
                 _("invalid keys"),
                 code="invalid_keys"

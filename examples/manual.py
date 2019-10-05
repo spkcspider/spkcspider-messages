@@ -203,24 +203,27 @@ def action_send(argv, pkey, pkey_hash, session, response, src_keys):
         }
     )
     if not response.ok:
-        logger.error("Creation failed: %s", response.text)
-        parser.exit(1, "Creation failed: %s" % response.text)
+        logger.error("retrieval csrftoken failed: %s", response.text)
+        parser.exit(1, "retrieval csrftoken failed: %s" % response.text)
     g = Graph()
     g.parse(data=response.content, format="html")
+    csrftoken = list(g.objects(predicate=spkcgraph["csrftoken"]))[0]
     # create message object
     response = session.post(
         message_create_url, data={
-            "csrftoken": list(g.objects(predicate=spkcgraph["csrftoken"]))[0],
             "own_hash": pkey_hash,
             "key_list": json.dumps(src_key_list),
             "encrypted_content": io.BytesIO(
                 b"%b\0%b" % (nonce, blob)
             )
         }, headers={
+            "X-CSRFToken": csrftoken,
             "X-TOKEN": argv.token  # only for src
         }
     )
-    response.raise_for_status()
+    if not response.ok:
+        logger.error("Message creation failed: %s", response.text)
+        parser.exit(1, "Message creation failed: %s" % response.text)
     response_dest = session.post(
         webref_url, data={
             "url": response.url,
@@ -232,7 +235,7 @@ def action_send(argv, pkey, pkey_hash, session, response, src_keys):
 
 
 def action_view(argv, pkey, pkey_hash, session, response):
-    if argv.access_type == "ref":
+    if argv.access_type == "get_webref":
         key_list = json.loads(response.headers["X-KEYLIST"])
         key = key_list.get("keyhash", None)
         if not key:
@@ -250,6 +253,15 @@ def action_view(argv, pkey, pkey_hash, session, response):
         blob = ctx.decrypt(nonce, content)
         headers, content = blob.split(b"\n\n", 1)
         argv.file.write(content)
+        if argv.action == "view":
+            response = session.post(
+                merge_get_url(argv.url, raw="embed"),
+                data={
+                    "keyhash": pkey_hash
+                }, headers={
+                    "X-TOKEN": argv.token
+                }
+            )
     else:
         g = Graph()
         g.parse(data=response.content, format="turtle")
@@ -270,6 +282,7 @@ def action_view(argv, pkey, pkey_hash, session, response):
                 )
             }
         ))
+        breakpoint()
         if len(q) == 0:
             parser.exit(1, "postbox not found\n")
         q2 = {}
@@ -402,6 +415,7 @@ def main(argv):
             )
         else:
             own_url = merge_get_url(argv.url, raw="embed")
+
         response = s.get(own_url, headers={
             "X-TOKEN": argv.token
         })
@@ -462,14 +476,6 @@ def main(argv):
                 )
                 parser.exit(1, "invalid keys\n")
         # check own domain
-
-        if argv.action == "view":
-            response = s.post(
-                merge_get_url(argv.url, raw="embed"),
-                data={
-                    "keyhash": pkey_hash
-                }
-            )
 
         if argv.action == "send":
             return action_send(
