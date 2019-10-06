@@ -106,7 +106,8 @@ class AttestationChecker(object):
             CREATE TABLE IF NOT EXISTS domain (
                 id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
                 url TEXT NOT NULL UNIQUE,
-                attestation BLOB
+                attestation BLOB,
+                hash_algo TEXT
             )
             '''
         )
@@ -190,12 +191,21 @@ class AttestationChecker(object):
                 continue
         return (attestation, errored, key_hashes)
 
+    def get_domain_info(self, domain):
+        domain_row = self.con.execute("""
+            SElECT id, attestation, hash_algo FROM domain WHERE url=?
+        """, (domain,)).fetchone()
+        if domain_row:
+            return tuple(*domain_row)
+        return None, None, None
+
     def add(
-        self, domain, hash_keys, attestation=None, algo=None, _cur=None,
+        self, domain, hash_keys, algo, *, attestation=None, _cur=None,
         embed=False
     ):
         """
             attestation: provide attestation instead of generating it again
+            algo: hash algorithm
             hash_keys:
                 string/bytes: use as hash
                 public_keys/certs: calc hash (in combination with algo)
@@ -224,8 +234,16 @@ class AttestationChecker(object):
             if not attestation:
                 attestation = None
             cursor.execute("""
-                INSERT OR REPLACE INTO domain (url, attestation) VALUES(?, ?)
+                INSERT OR REPLACE INTO domain
+                (url, attestation)
+                VALUES(?, ?)
             """, (domain, attestation))
+
+        cursor.execute("""
+            INSERT OR REPLACE INTO domain
+            (url, hash_algo)
+            VALUES(?, ?)
+        """, (domain, algo.name.upper()))
 
         domainid = self.con.execute("""
             SElECT id, attestation FROM domain WHERE url=?
@@ -239,7 +257,7 @@ class AttestationChecker(object):
         return hash_keys
 
     def check(
-        self, domain, hash_keys, attestation=None, algo=None, auto_add=True,
+        self, domain, hash_keys, algo=None, *, attestation=None, auto_add=True,
         embed=False
     ):
         """
@@ -257,6 +275,7 @@ class AttestationChecker(object):
             attestation = base64.urlsafe_b64decode(attestation)
         elif not attestation and algo:
             attestation = self.calc_attestation(hash_keys, algo, embed=True)
+        assert algo or not auto_add
 
         if attestation:
             result = self.check_signatures(
@@ -270,7 +289,7 @@ class AttestationChecker(object):
         """, (domain,)).fetchone()
         if not domain_row:
             if auto_add:
-                self.add(domain, hash_keys, attestation=attestation)
+                self.add(domain, hash_keys, algo, attestation=attestation)
                 return (
                     AttestationResult.domain_unknown, [], hash_keys
                 )
@@ -302,7 +321,7 @@ class AttestationChecker(object):
                 self.con.commit()
                 return (AttestationResult.success, [], hash_keys)
             self.add(
-                domain, only_hashes.difference(old_hashes),
+                domain, only_hashes.difference(old_hashes), algo,
                 attestation=attestation, _cur=_cur, embed=True
             )
         if only_hashes.issubset(old_hashes):

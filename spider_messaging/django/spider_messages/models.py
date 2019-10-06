@@ -21,7 +21,7 @@ from django.test import Client
 
 from jsonfield import JSONField
 
-from rdflib import Literal, BNode, RDF
+from rdflib import Literal, BNode
 import requests
 
 from spkcspider.utils.urls import merge_get_url
@@ -112,10 +112,15 @@ class PostBox(BaseContent):
         through="spider_messages.PostBoxKey"
     )
 
+    # @classmethod
+    # def feature_urls(cls, name):
+    #    return [
+    #        ActionUrl("fetch_message", reverse("spider_messages:message"))
+    #    ]
+
     def map_data(self, name, field, data, graph, context):
         if name == "message_list":
-            if data is None:
-                return RDF.nil
+            # per node create a message anonymous Node
             ret = BNode()
             for nname, val in data.items():
                 value_node = add_property(
@@ -132,8 +137,7 @@ class PostBox(BaseContent):
                 ))
             return ret
         elif name == "signatures":
-            if data is None:
-                return RDF.nil
+            # per node create a signature Entity
             ret = literalize(data["key"], domain_base=context["hostpart"])
             value_node = add_property(
                 graph, "signature", ref=ret,
@@ -183,10 +187,6 @@ class PostBox(BaseContent):
         ):
             return {"push_webref"}
         return set()
-
-    @csrf_exempt
-    def access_view(self, **kwargs):
-        return super().access_view(**kwargs)
 
     @csrf_exempt
     def access_push_webref(self, **kwargs):
@@ -438,9 +438,19 @@ class MessageContent(BaseContent):
     def get_strength_link(self):
         return 11
 
+    def get_priority(self):
+        return -10
+
+    def get_info(self):
+        return super().get_info(unlisted=True)
+
     def get_form(self, scope):
         from .forms import MessageForm
         return MessageForm
+
+    # def get_form_kwargs(self, request, **kwargs):
+    #     kwargs["request"] = request
+    #     return super().get_form_kwargs(request=request, **kwargs)
 
     def access_raw_update(self, **kwargs):
         pass

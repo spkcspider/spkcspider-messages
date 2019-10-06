@@ -116,7 +116,7 @@ class PostBoxForm(forms.ModelForm):
     def __init__(self, scope, request, **kwargs):
         super().__init__(**kwargs)
         self.initial["hash_algorithm"] = settings.SPIDER_HASH_ALGORITHM.name
-        if scope in {"view", "raw"} and request.is_owner:
+        if scope in {"view", "raw", "list"} and request.is_owner:
             self.initial["message_list"] = [
                 {
                     "id": i.id,
@@ -197,7 +197,7 @@ class PostBoxForm(forms.ModelForm):
 
 class MessageForm(forms.ModelForm):
     own_hash = forms.CharField(required=False, initial="")
-    url = forms.CharField(disabled=True, initial="")
+    fetch_url = forms.CharField(disabled=True, initial="")
 
     class Meta:
         model = MessageContent
@@ -206,7 +206,7 @@ class MessageForm(forms.ModelForm):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         if self.instance.id:
-            self.initial["url"] = urljoin(
+            self.initial["fetch_url"] = urljoin(
                 "{}://{}".format(
                     get_anchor_scheme(),
                     get_anchor_domain()
@@ -216,7 +216,7 @@ class MessageForm(forms.ModelForm):
                 "?"
             )
         else:
-            del self.fields["url"]
+            del self.fields["fetch_url"]
 
     def _save_m2m(self):
         super()._save_m2m()

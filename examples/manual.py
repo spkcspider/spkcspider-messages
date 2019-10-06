@@ -212,21 +212,45 @@ def action_send(argv, pkey, pkey_hash, session, response, src_keys):
     response = session.post(
         message_create_url, data={
             "own_hash": pkey_hash,
-            "key_list": json.dumps(src_key_list),
-            "encrypted_content": io.BytesIO(
-                b"%b\0%b" % (nonce, blob)
-            )
+            "key_list": json.dumps(src_key_list)
         }, headers={
             "X-CSRFToken": csrftoken,
             "X-TOKEN": argv.token  # only for src
+        },
+        files={
+            "encrypted_content": io.BytesIO(
+                b"%b\0%b" % (nonce, blob)
+            )
         }
     )
-    if not response.ok:
+    if not response.ok or message_create_url == response.url:
         logger.error("Message creation failed: %s", response.text)
         parser.exit(1, "Message creation failed: %s" % response.text)
+    g = Graph()
+    g.parse(data=response.content, format="html")
+    q = list(g.query(
+        """
+            SELECT DISTINCT ?value
+            WHERE {
+                ?property spkc:name ?name .
+                ?property spkc:value ?value .
+            }
+        """,
+        initNs={"spkc": spkcgraph},
+        initBindings={
+            "name": Literal(
+                "fetch_url", datatype=XSD.string
+            )
+        }
+    ))
+
+    if not q:
+        logger.error("Message creation failed: %s", response.text)
+        parser.exit(1, "Message creation failed: %s" % response.text)
+    # extract url
     response_dest = session.post(
         webref_url, data={
-            "url": response.url,
+            "url": q[0],
             "rtype": ReferenceType.message,
             "key_list": json.dumps(dest_key_list)
         }
@@ -236,6 +260,25 @@ def action_send(argv, pkey, pkey_hash, session, response, src_keys):
 
 def action_view(argv, pkey, pkey_hash, session, response):
     if argv.access_type == "get_webref":
+        getref_url = merge_get_url(
+            replace_action(
+                argv.url, "view/"
+            ), raw="embed"
+        )
+        if argv.action == "peek":
+            response = session.get(
+                getref_url, headers={
+                    "X-TOKEN": argv.token
+                }
+            )
+        else:
+            response = session.post(
+                getref_url, headers={
+                    "X-TOKEN": argv.token
+                }, data={
+                    "keyhash": pkey_hash
+                }
+            )
         key_list = json.loads(response.headers["X-KEYLIST"])
         key = key_list.get("keyhash", None)
         if not key:
@@ -409,7 +452,13 @@ def main(argv):
         )
 
     with requests.Session() as s:
-        if access == "list":
+        if access == "get_ref":
+            own_url = merge_get_url(
+                replace_action(
+                    argv.url, "view/"
+                ), raw="embed"
+            )
+        elif access == "list":
             own_url = merge_get_url(
                 argv.url, raw="embed", info="_type=PostBox"
             )
@@ -459,7 +508,9 @@ def main(argv):
         digest = hashes.Hash(argv.src_hash_algo, backend=default_backend())
         digest.update(pem_public)
         pkey_hash = digest.finalize().hex()
-        argv.attestation.add(own_url.split("?", 1)[0], [pkey_hash])
+        argv.attestation.add(
+            own_url.split("?", 1)[0], [pkey_hash], argv.src_hash_algo
+        )
         src_keys = None
         if argv.action != "check":
             result_own, errored, src_keys = argv.attestation.check(
@@ -482,9 +533,7 @@ def main(argv):
                 argv, pkey, pkey_hash, s, response, src_keys
             )
         elif argv.action in {"view", "peek"}:
-            return action_view(
-                argv, pkey, pkey_hash, s, response
-            )
+            return action_view(argv, pkey, pkey_hash, s, response)
         elif argv.action == "check":
             ret = action_check(argv, pkey, pkey_hash, s, response)
             if ret is not True:

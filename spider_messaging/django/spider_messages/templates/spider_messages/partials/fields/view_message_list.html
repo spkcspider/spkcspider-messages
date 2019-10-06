@@ -8,7 +8,7 @@
   <ul class="w3-white">
     {% for val in field|field_to_python %}
       <data typeof="spkc:Entity">
-        <span>{% trans 'Sender' %}: {{val.sender|default:val.url}}</span>
+        <span>{% trans 'Sender' %}: {{val.sender|default:val.sender}}</span>
         <data hidden="hidden" rel="spkc:properties">
           {% for d in val.items %}
             {% literalize d.1 as LiteralData %}
