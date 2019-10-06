@@ -202,6 +202,7 @@ def action_send(argv, pkey, pkey_hash, session, response, src_keys):
             "X-TOKEN": argv.token
         }
     )
+    utokens = [base64.urlsafe_b64encode(os.urandom(20)).decode("ascii")]
     if not response.ok:
         logger.error("retrieval csrftoken failed: %s", response.text)
         parser.exit(1, "retrieval csrftoken failed: %s" % response.text)
@@ -212,7 +213,8 @@ def action_send(argv, pkey, pkey_hash, session, response, src_keys):
     response = session.post(
         message_create_url, data={
             "own_hash": pkey_hash,
-            "key_list": json.dumps(src_key_list)
+            "key_list": json.dumps(src_key_list),
+            "utokens": utokens
         }, headers={
             "X-CSRFToken": csrftoken,
             "X-TOKEN": argv.token  # only for src
@@ -250,7 +252,7 @@ def action_send(argv, pkey, pkey_hash, session, response, src_keys):
     # extract url
     response_dest = session.post(
         webref_url, data={
-            "url": q[0],
+            "url": merge_get_url(q[0].value, utoken=utokens[0]),
             "rtype": ReferenceType.message,
             "key_list": json.dumps(dest_key_list)
         }
@@ -308,32 +310,31 @@ def action_view(argv, pkey, pkey_hash, session, response):
     else:
         g = Graph()
         g.parse(data=response.content, format="turtle")
-        q = list(g.query(
+        queried = {}
+        for i in g.query(
             """
-                SELECT DISTINCT ?base ?name ?value
+                SELECT DISTINCT ?base ?message_name ?message_value
                 WHERE {
-                    ?property spkc:name ?message_list .
+                    ?property spkc:name ?search_name .
                     ?property spkc:value ?base .
-                    ?base spkc:name ?name .
-                    ?base spkc:value ?value .
+                    ?base spkc:properties ?message_base_prop .
+                    ?message_base_prop spkc:name ?message_name .
+                    ?message_base_prop spkc:value ?message_value .
                 }
             """,
             initNs={"spkc": spkcgraph},
             initBindings={
-                "message_list": Literal(
+                "search_name": Literal(
                     "message_list", datatype=XSD.string
                 )
             }
-        ))
-        breakpoint()
-        if len(q) == 0:
+        ):
+            queried.setdefault(str(i.base), {})
+            queried[str(i.base)][str(i.message_name)] = i.message_value
+        if len(queried) == 0:
             parser.exit(1, "postbox not found\n")
-        q2 = {}
-        for i in q:
-            q2.setdefault(str(i.base), {})
-            q2[str(i.base)][str(i.name)] = i.value
         print("Messages:")
-        for i in q2:
+        for i in sorted(queried.values(), key=lambda x: x["id"]):
             print(i["id"], i["sender"])
         # view
 

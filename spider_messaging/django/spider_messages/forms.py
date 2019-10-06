@@ -4,7 +4,6 @@ import re
 import binascii
 import base64
 import json
-from urllib.parse import urljoin
 
 from django.conf import settings
 from django.db.models import Q
@@ -121,7 +120,7 @@ class PostBoxForm(forms.ModelForm):
                 {
                     "id": i.id,
                     "size": i.cached_size,
-                    "sender": i.url.split("?", 1)[0]
+                    "sender": "%s?..." % i.url.split("?", 1)[0]
                 } for i in self.instance.references.all()
             ]
         elif scope == "export":
@@ -206,15 +205,15 @@ class MessageForm(forms.ModelForm):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         if self.instance.id:
-            self.initial["fetch_url"] = urljoin(
-                "{}://{}".format(
+            self.initial["fetch_url"] = \
+                "{}://{}{}?urlpart={}/view".format(
                     get_anchor_scheme(),
-                    get_anchor_domain()
-                ), reverse(
-                    "spider_messages:message"
-                ),
-                "?"
-            )
+                    get_anchor_domain(),
+                    reverse(
+                        "spider_messages:message"
+                    ),
+                    self.instance.associated.token
+                )
         else:
             del self.fields["fetch_url"]
 
@@ -224,4 +223,8 @@ class MessageForm(forms.ModelForm):
         for h in self.instance.key_list.keys():
             self.instance.copies.create(
                 keyhash=h, received=(h == self.cleaned_data["own_hash"])
+            )
+        for utoken in self.data.getlist("utokens"):
+            self.instance.receivers.create(
+                utoken=utoken
             )

@@ -35,8 +35,8 @@ class MessageContentView(UserTestMixin, View):
 
     def get_object(self):
         try:
-            return AssignedContent.objects.from_url(
-                self.request.GET.get("url", ""), variant="MessageContent"
+            return AssignedContent.objects.from_url_part(
+                self.request.GET.get("urlpart", ""), variant="MessageContent"
             )
         except (
             AssignedContent.ModelDoesNotExist,
