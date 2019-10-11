@@ -2,7 +2,6 @@
 import binascii
 import sqlite3
 import base64
-import enum
 from itertools import repeat
 
 from cryptography.hazmat.primitives.asymmetric import padding
@@ -11,13 +10,7 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.backends import default_backend
 
 from .keys import load_public_key
-
-
-class AttestationResult(enum.IntEnum):
-    success = 0
-    partial_success = 1
-    domain_unknown = 2
-    error = 3
+from .constants import AttestationResult
 
 
 def _extract_hash_key2(val, algo=None):
@@ -266,6 +259,7 @@ class AttestationChecker(object):
                 pairs (key, signature): check also signature
                 triples (hash, key, signature): check signature, recalc
         """
+        assert algo or not auto_add
         if not embed:
             hash_keys = [
                 _extract_hash_key(x, algo, True) for x in hash_keys
@@ -275,26 +269,22 @@ class AttestationChecker(object):
             attestation = base64.urlsafe_b64decode(attestation)
         elif not attestation and algo:
             attestation = self.calc_attestation(hash_keys, algo, embed=True)
-        assert algo or not auto_add
 
         if attestation:
             result = self.check_signatures(
                 hash_keys, attestation=attestation, embed=True
             )
             if result[1]:
-                return result
+                return (AttestationResult.error, result[1], hash_keys)
 
         domain_row = self.con.execute("""
             SElECT id, attestation FROM domain WHERE url=?
         """, (domain,)).fetchone()
         if not domain_row:
-            if auto_add:
-                self.add(domain, hash_keys, algo, attestation=attestation)
-                return (
-                    AttestationResult.domain_unknown, [], hash_keys
-                )
-            else:
-                return (AttestationResult.error, [], hash_keys)
+            return (
+                AttestationResult.domain_unknown, [], hash_keys
+            )
+        # nothing has changed, skip
         if attestation and domain_row[1] == attestation:
             return (AttestationResult.success, [], hash_keys)
 

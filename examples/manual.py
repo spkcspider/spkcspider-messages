@@ -19,9 +19,9 @@ from rdflib import Graph, XSD, Literal
 from spkcspider.utils.urls import merge_get_url
 from spkcspider.constants import static_token_matcher, spkcgraph
 
-from spider_messaging.constants import ReferenceType
+from spider_messaging.constants import ReferenceType, AttestationResult
 from spider_messaging.attestation import (
-    AttestationChecker, AttestationResult
+    AttestationChecker
 )
 from spider_messaging.keys import load_priv_key
 
@@ -520,9 +520,14 @@ def main(argv):
                     lambda x: (x["key"], x["signature"]),
                     src.values()
                 ),
-                algo=argv.src_hash_algo
+                algo=argv.src_hash_algo, auto_add=True
             )
-            if result_own != AttestationResult.success:
+            if result_own == AttestationResult.domain_unknown:
+                logger.critical(
+                    "home url unknown, should not happen"
+                )
+                parser.exit(1, "invalid home url\n")
+            elif result_own != AttestationResult.success:
                 logger.critical(
                     "Home base url contains invalid keys, hacked?"
                 )
