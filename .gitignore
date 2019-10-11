@@ -11,6 +11,7 @@ media
 node_modules
 pip-wheel-metadata/
 
+.vscode
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
