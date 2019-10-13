@@ -64,7 +64,7 @@ def UpdateKeysCb(sender, instance, action, **kwargs):
 
 def DeleteFileCb(sender, instance, **kwargs):
     WebReference = apps.get_model("spider_messages", "WebReference")
-    if isinstance(sender, WebReference):
+    if isinstance(instance, WebReference):
         if instance.cached_size is not None:
             instance.cached_content.delete(False)
     else:

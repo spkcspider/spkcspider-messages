@@ -123,12 +123,13 @@ class AttestationChecker(object):
     @classmethod
     def calc_attestation(cls, key_list, algo, embed=False):
         """
-            key_hashes:
+            key_list:
                 string/bytes: hashes
                 pairs (hash, key): use hash of key
                 pairs (key, signature): autogeneration of missing key hash
                 triples (hash, key, signature):
                     use hash of key
+            embed: asser correct triple format. Disables checks, conversions
         """
         hasher = hashes.Hash(algo, backend=default_backend())
         if not embed:
@@ -152,6 +153,7 @@ class AttestationChecker(object):
                 pairs (key, signature): autogeneration of missing key hash
                 triples (hash, key, signature):
                     hash provided as first argument (more efficient)
+            embed: assert correct triples format, disables checks
         """
         if not embed:
             key_hashes = [

@@ -14,7 +14,7 @@ cryptography = "*"
 
 
 [tool.poetry.dev-dependencies]
-spkcspider = ">=0.17"
+spkcspider = ">=0.20.1"
 spkcspider-domainauth = ">=0.4"
 django-extensions = "*"
 twisted = "*"

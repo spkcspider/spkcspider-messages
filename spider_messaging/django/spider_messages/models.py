@@ -305,7 +305,7 @@ class WebReference(models.Model):
                         Referer=merge_get_url(
                             "%s%s" % (
                                 kwargs["hostpart"],
-                                self.request.path
+                                kwargs["request"].path
                             )
                         )
                     )
@@ -338,7 +338,7 @@ class WebReference(models.Model):
                             "Referer": merge_get_url(
                                 "%s%s" % (
                                     kwargs["hostpart"],
-                                    self.request.path
+                                    kwargs["request"].path
                                 )
                             ),
                             "Connection": "close"
@@ -348,6 +348,7 @@ class WebReference(models.Model):
                     ) as resp:
                         resp.raise_for_status()
                         c_length = resp.headers.get("content-length", None)
+                        breakpoint()
                         if (
                             c_length is None or
                             c_length > int(settings.MAX_UPLOAD_SIZE)

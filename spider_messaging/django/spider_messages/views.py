@@ -37,7 +37,7 @@ class MessageContentView(UserTestMixin, View):
         try:
             return AssignedContent.objects.from_url_part(
                 self.request.GET.get("urlpart", ""), variant="MessageContent"
-            )
+            )[0]
         except (
             AssignedContent.ModelDoesNotExist,
             AssignedContent.MultipleObjectsReturned
@@ -50,15 +50,15 @@ class MessageContentView(UserTestMixin, View):
         )
         return self.receivers.exists()
 
-    def options(self, request, *args, **kwargs):
-        ret = super().options()
-        ret["Access-Control-Allow-Origin"] = "*"
-        ret["Access-Control-Allow-Methods"] = "GET, OPTIONS"
-        return ret
-
-    def get(self):
+    def get(self, request, *args, **kwargs):
         ret = CbFileResponse(
             self.object.encrypted_content.open()
         )
         ret.msgreceivers = self.receivers
+        return ret
+
+    def options(self, request, *args, **kwargs):
+        ret = super().options(request, *args, **kwargs)
+        ret["Access-Control-Allow-Origin"] = "*"
+        ret["Access-Control-Allow-Methods"] = "GET, OPTIONS"
         return ret

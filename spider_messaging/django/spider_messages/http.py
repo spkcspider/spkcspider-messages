@@ -12,5 +12,5 @@ class CbFileResponse(FileResponse):
         super().close()
         if self.status_code == 200:
             successful_transmitted.send(
-                sender=CbFileResponse, instance=self
+                sender=CbFileResponse, response=self
             )

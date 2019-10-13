@@ -57,10 +57,16 @@ view_parser.add_argument(
     '--file', help='Use file instead stdout', type=argparse.FileType('wb'),
     nargs="?", default=sys.stdout.buffer
 )
+view_parser.add_argument(
+    'message_id', help='View message with id', nargs="?"
+)
 peek_parser = subparsers.add_parser("peek")
 peek_parser.add_argument(
     '--file', help='Use file instead stdout', type=argparse.FileType('wb'),
     nargs="?", default=sys.stdout.buffer
+)
+peek_parser.add_argument(
+    'message_id', help='View message with id', nargs="?"
 )
 subparsers.add_parser("check")
 send_parser = subparsers.add_parser("send")
@@ -261,11 +267,17 @@ def action_send(argv, pkey, pkey_hash, session, response, src_keys):
 
 
 def action_view(argv, pkey, pkey_hash, session, response):
-    if argv.access_type == "get_webref":
+    g_message = Graph()
+    g_message.parse(data=response.content, format="turtle")
+    if argv.message_id is not None:
+        postbox_url = g_message.value(
+            predicate=spkcgraph["type"],
+            object=Literal("PostBox", datatype=XSD.string)
+        )
         getref_url = merge_get_url(
             replace_action(
-                argv.url, "view/"
-            ), raw="embed"
+                postbox_url, "get_webref/"
+            ), reference=argv.message_id
         )
         if argv.action == "peek":
             response = session.get(
@@ -281,6 +293,9 @@ def action_view(argv, pkey, pkey_hash, session, response):
                     "keyhash": pkey_hash
                 }
             )
+        if not response.ok:
+            print(response.text)
+            exit(0)
         key_list = json.loads(response.headers["X-KEYLIST"])
         key = key_list.get("keyhash", None)
         if not key:
@@ -298,20 +313,9 @@ def action_view(argv, pkey, pkey_hash, session, response):
         blob = ctx.decrypt(nonce, content)
         headers, content = blob.split(b"\n\n", 1)
         argv.file.write(content)
-        if argv.action == "view":
-            response = session.post(
-                merge_get_url(argv.url, raw="embed"),
-                data={
-                    "keyhash": pkey_hash
-                }, headers={
-                    "X-TOKEN": argv.token
-                }
-            )
     else:
-        g = Graph()
-        g.parse(data=response.content, format="turtle")
         queried = {}
-        for i in g.query(
+        for i in g_message.query(
             """
                 SELECT DISTINCT ?base ?message_name ?message_value
                 WHERE {
@@ -331,12 +335,16 @@ def action_view(argv, pkey, pkey_hash, session, response):
         ):
             queried.setdefault(str(i.base), {})
             queried[str(i.base)][str(i.message_name)] = i.message_value
-        if len(queried) == 0:
-            parser.exit(1, "postbox not found\n")
+        if len(queried) == 0 and not g_message.value(
+            predicate=spkcgraph["name"],
+            object=Literal(
+                "message_list", datatype=XSD.string
+            )
+        ):
+            parser.exit(1, "messages not found; logged in?\n")
         print("Messages:")
         for i in sorted(queried.values(), key=lambda x: x["id"]):
             print(i["id"], i["sender"])
-        # view
 
 
 def action_check(argv, pkey, pkey_hash, session, response, verb=True):
@@ -421,7 +429,7 @@ def main(argv):
         parser.exit(1, "url doesn't match action\n")
     if (
         argv.action in {"view", "peek"} and
-        access not in {"view", "get_webref", "list"}
+        access not in {"view", "list"}
     ):
         parser.exit(1, "url doesn't match action\n")
     if (
