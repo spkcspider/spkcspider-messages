@@ -153,15 +153,26 @@ def action_send(argv, pkey, pkey_hash, session, response, src_keys):
     dest_hash = getattr(
         hashes, next(iter(dest.values()))["hash_algorithm"].upper()
     )()
+    bdomain = response_dest.url.split("?", 1)[0]
     result_dest, errored, dest_keys = argv.attestation.check(
-        response_dest.url.split("?", 1)[0],
+        bdomain,
         map(
             lambda x: (x["key"], x["signature"]),
             dest.values()
         ),
         algo=dest_hash
     )
-    if result_dest != AttestationResult.success:
+    if result_dest == AttestationResult.domain_unknown:
+        logger.info("add domain: %s", bdomain)
+        argv.attestation.add(
+            bdomain,
+            map(
+                lambda x: (x["key"], x["signature"]),
+                dest.values()
+            ),
+            algo=dest_hash
+        )
+    elif result_dest == AttestationResult.error:
         logger.critical("Dest base url contains invalid keys.")
         parser.exit(1, "dest contains invalid keys\n")
 

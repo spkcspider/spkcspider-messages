@@ -310,7 +310,7 @@ class WebReference(models.Model):
                         ), SERVER_NAME=inline_domain
                     )
                     if resp.status_code < 400:
-                        c_length = resp.headers.get("content-length", None)
+                        c_length = resp.get("content-length", None)
                         if (
                             c_length is None or
                             c_length > int(settings.MAX_UPLOAD_SIZE)
