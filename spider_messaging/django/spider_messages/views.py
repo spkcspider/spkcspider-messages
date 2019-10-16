@@ -39,7 +39,7 @@ class MessageContentView(UserTestMixin, View):
                 self.request.GET.get("urlpart", ""), variant="MessageContent"
             )[0]
         except (
-            AssignedContent.ModelDoesNotExist,
+            AssignedContent.DoesNotExist,
             AssignedContent.MultipleObjectsReturned
         ):
             raise Http404()

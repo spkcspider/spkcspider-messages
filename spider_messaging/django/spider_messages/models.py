@@ -297,8 +297,8 @@ class WebReference(models.Model):
 
     def access_message(self, kwargs):
         if self.cached_size is None:
-            params, can_inline = get_requests_params(self.url)
-            if can_inline:
+            params, inline_domain = get_requests_params(self.url)
+            if inline_domain:
                 try:
                     resp = Client().get(
                         self.url, follow=True, secure=True, Connection="close",
@@ -307,7 +307,7 @@ class WebReference(models.Model):
                                 kwargs["hostpart"],
                                 kwargs["request"].path
                             )
-                        )
+                        ), SERVER_NAME=inline_domain
                     )
                     if resp.status_code < 400:
                         c_length = resp.headers.get("content-length", None)
@@ -323,7 +323,7 @@ class WebReference(models.Model):
                             fp.write(chunk)
                         self.postbox.update_used_space(fp.size)
                         self.cached_size = fp.size
-                        # saves also cached_size
+                        # updates also cached_size
                         self.cached_content.save("", fp)
                 except ValidationError as exc:
                     logging.info(
