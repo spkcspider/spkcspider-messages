@@ -54,7 +54,7 @@ class MessageContentView(UserTestMixin, View):
         ret = CbFileResponse(
             self.object.encrypted_content.open()
         )
-        ret["content-size"] = self.object.encrypted_content.size
+        ret["content-length"] = self.object.encrypted_content.size
         ret.msgreceivers = self.receivers
         return ret
 

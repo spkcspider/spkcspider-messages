@@ -113,13 +113,13 @@ def action_send(argv, pkey, pkey_hash, session, response, src_keys):
     g_dest = Graph()
     g_dest.parse(data=response.content, format="turtle")
 
-    webref_url = g_dest.value(
+    postbox_url = g_dest.value(
         predicate=spkcgraph["ability:name"],
         object=Literal("push_webref", datatype=XSD.string)
     )
-    if not webref_url:
+    if not postbox_url:
         parser.exit(1, "dest does not support push_webref ability\n")
-    webref_url = replace_action(webref_url, "push_webref/")
+    webref_url = replace_action(postbox_url, "push_webref/")
     response_dest = session.get(
         merge_get_url(webref_url, raw="embed")
     )
@@ -153,7 +153,8 @@ def action_send(argv, pkey, pkey_hash, session, response, src_keys):
     dest_hash = getattr(
         hashes, next(iter(dest.values()))["hash_algorithm"].upper()
     )()
-    bdomain = response_dest.url.split("?", 1)[0]
+    bdomain = postbox_url.split("?", 1)[0]
+    print(bdomain)
     result_dest, errored, dest_keys = argv.attestation.check(
         bdomain,
         map(
@@ -162,6 +163,7 @@ def action_send(argv, pkey, pkey_hash, session, response, src_keys):
         ),
         algo=dest_hash
     )
+    print(bdomain)
     if result_dest == AttestationResult.domain_unknown:
         logger.info("add domain: %s", bdomain)
         argv.attestation.add(

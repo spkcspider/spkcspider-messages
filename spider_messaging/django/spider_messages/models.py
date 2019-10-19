@@ -13,7 +13,7 @@ from django.http import HttpResponse, HttpResponsePermanentRedirect
 from django.conf import settings
 from django.utils.translation import pgettext, gettext_lazy as _
 from django.core.files.storage import default_storage
-from django.core.files.uploadedfile import TemporaryUploadedFile
+from django.core.files.temp import NamedTemporaryFile
 from django.core.exceptions import ValidationError
 from django.views.decorators.csrf import csrf_exempt
 from django.test import Client
@@ -311,14 +311,21 @@ class WebReference(models.Model):
                     )
                     if resp.status_code < 400:
                         c_length = resp.get("content-length", None)
+                        max_length = getattr(
+                            settings, "SPIDER_MAX_FILE_SIZE", None
+                        )
                         if (
-                            c_length is None or
-                            c_length > int(settings.MAX_UPLOAD_SIZE)
+                            max_length and (
+                                c_length is None or
+                                c_length > max_length
+                            )
                         ):
                             return HttpResponse(
                                 "Too big/not specified", status=413
                             )
-                        fp = TemporaryUploadedFile()
+                        fp = NamedTemporaryFile(
+                            suffix='.upload', dir=settings.FILE_UPLOAD_TEMP_DIR
+                        )
                         for chunk in resp:
                             fp.write(chunk)
                         self.postbox.update_used_space(fp.size)
@@ -348,13 +355,12 @@ class WebReference(models.Model):
                     ) as resp:
                         resp.raise_for_status()
                         c_length = resp.headers.get("content-length", None)
-                        breakpoint()
                         if (
                             c_length is None or
                             c_length > int(settings.MAX_UPLOAD_SIZE)
                         ):
                             return HttpResponse("Too big", status=413)
-                        fp = TemporaryUploadedFile()
+                        fp = NamedTemporaryFile()
                         try:
                             for chunk in resp.iter_content(
                                 fp.DEFAULT_CHUNK_SIZE
