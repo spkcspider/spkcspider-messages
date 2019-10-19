@@ -1,6 +1,7 @@
 __all__ = ("MessageContentView",)
 
 from django.http import Http404
+from django.conf import settings
 
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
@@ -54,6 +55,8 @@ class MessageContentView(UserTestMixin, View):
         ret = CbFileResponse(
             self.object.encrypted_content.open()
         )
+        # cached, needs only content-length
+        # don't add key-list; it is just for own keys
         ret["content-length"] = self.object.encrypted_content.size
         ret.msgreceivers = self.receivers
         return ret

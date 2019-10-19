@@ -154,7 +154,6 @@ def action_send(argv, pkey, pkey_hash, session, response, src_keys):
         hashes, next(iter(dest.values()))["hash_algorithm"].upper()
     )()
     bdomain = postbox_url.split("?", 1)[0]
-    print(bdomain)
     result_dest, errored, dest_keys = argv.attestation.check(
         bdomain,
         map(
@@ -163,7 +162,6 @@ def action_send(argv, pkey, pkey_hash, session, response, src_keys):
         ),
         algo=dest_hash
     )
-    print(bdomain)
     if result_dest == AttestationResult.domain_unknown:
         logger.info("add domain: %s", bdomain)
         argv.attestation.add(
@@ -307,23 +305,25 @@ def action_view(argv, pkey, pkey_hash, session, response):
                 }
             )
         if not response.ok:
-            print(response.text)
-            exit(0)
+            exit(0, "message not found")
+        # own_key_hash = getattr(
+        #     hashes, response.headers["X-KEYHASH-ALGO"].upper()
+        # )()
         key_list = json.loads(response.headers["X-KEYLIST"])
-        key = key_list.get("keyhash", None)
+        key = key_list.get(pkey_hash, None)
         if not key:
             parser.exit(0, "message not for me\n")
         decrypted_key = pkey.decrypt(
-            key,
+            base64.urlsafe_b64decode(key),
             padding.OAEP(
-                mgf=padding.MGF1(algorithm=argv.hash),
-                algorithm=argv.hash,
+                mgf=padding.MGF1(algorithm=argv.src_hash_algo),
+                algorithm=argv.src_hash_algo,
                 label=None
             )
         )
         ctx = AESGCM(decrypted_key)
         nonce, content = response.content.split(b"\0", 1)
-        blob = ctx.decrypt(nonce, content)
+        blob = ctx.decrypt(nonce, content, None)
         headers, content = blob.split(b"\n\n", 1)
         argv.file.write(content)
     else:

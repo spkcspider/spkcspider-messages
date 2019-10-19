@@ -9,11 +9,14 @@ import logging
 
 from django.db import models
 
-from django.http import HttpResponse, HttpResponsePermanentRedirect
+from django.http import (
+    HttpResponse, HttpResponsePermanentRedirect, JsonResponse
+)
 from django.conf import settings
 from django.utils.translation import pgettext, gettext_lazy as _
 from django.core.files.storage import default_storage
 from django.core.files.temp import NamedTemporaryFile
+from django.core.files import File
 from django.core.exceptions import ValidationError
 from django.views.decorators.csrf import csrf_exempt
 from django.test import Client
@@ -216,13 +219,14 @@ class PostBox(BaseContent):
             return HttpResponse(status=410)
         return ref.access(kwargs)
 
+    @csrf_exempt
     def access_del_webref(self, **kwargs):
         ret = self.references.filter(
-            id__in=kwargs["request"].GET.get("reference")
+            id__in=kwargs["request"].POST.get("reference")
         )
+        # maybe use csrftoken later
         if ret.count() == 0:
             return HttpResponse(status=410)
-        # TODO: form
         ret.delete()
         return HttpResponse(status=200)
 
@@ -326,12 +330,13 @@ class WebReference(models.Model):
                         fp = NamedTemporaryFile(
                             suffix='.upload', dir=settings.FILE_UPLOAD_TEMP_DIR
                         )
+                        written_size = 0
                         for chunk in resp:
-                            fp.write(chunk)
-                        self.postbox.update_used_space(fp.size)
-                        self.cached_size = fp.size
+                            written_size += fp.write(chunk)
+                        self.postbox.update_used_space(written_size)
+                        self.cached_size = written_size
                         # updates also cached_size
-                        self.cached_content.save("", fp)
+                        self.cached_content.save("", File(fp))
                 except ValidationError as exc:
                     logging.info(
                         "Quota exceeded", exc_info=exc
@@ -360,19 +365,23 @@ class WebReference(models.Model):
                             c_length > int(settings.MAX_UPLOAD_SIZE)
                         ):
                             return HttpResponse("Too big", status=413)
-                        fp = NamedTemporaryFile()
+                        fp = NamedTemporaryFile(
+                            suffix='.upload',
+                            dir=settings.FILE_UPLOAD_TEMP_DIR
+                        )
+                        written_size = 0
                         try:
                             for chunk in resp.iter_content(
                                 fp.DEFAULT_CHUNK_SIZE
                             ):
-                                fp.write(chunk)
+                                written_size += fp.write(chunk)
                         except Exception:
                             del fp
                             raise
-                        self.postbox.update_used_space(fp.size)
-                        self.cached_size = fp.size
+                        self.postbox.update_used_space(written_size)
+                        self.cached_size = written_size
                         # saves also cached_size
-                        self.cached_content.save("", fp)
+                        self.cached_content.save("", File(fp))
 
                 except requests.exceptions.SSLError as exc:
                     logger.info(
