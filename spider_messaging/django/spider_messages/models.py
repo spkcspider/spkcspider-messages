@@ -300,10 +300,6 @@ class WebReference(models.Model):
         return ret
 
     def access_message(self, kwargs):
-        try:
-            self.cached_content.size
-        except ValueError:
-            self.cached_size = None
         if self.cached_size is None:
             params, inline_domain = get_requests_params(self.url)
             if inline_domain:
