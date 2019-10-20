@@ -10,7 +10,7 @@ import logging
 from django.db import models
 
 from django.http import (
-    HttpResponse, HttpResponsePermanentRedirect, JsonResponse
+    HttpResponse, HttpResponsePermanentRedirect
 )
 from django.conf import settings
 from django.utils.translation import pgettext, gettext_lazy as _

@@ -1,7 +1,6 @@
 __all__ = ("MessageContentView",)
 
 from django.http import Http404
-from django.conf import settings
 
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator

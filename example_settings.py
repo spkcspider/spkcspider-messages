@@ -33,3 +33,6 @@ DATABASES = {
 # FIXTURE_DIRS = [
 #     "tests/fixtures/"
 # ]
+
+SPIDER_ANCHOR_SCHEME = "http"
+SPIDER_ANCHOR_DOMAIN = "localhost:8000"

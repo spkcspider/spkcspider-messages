@@ -19,7 +19,7 @@ from spkcspider.apps.spider.fields import JsonField
 from spider_messaging.constants import ReferenceType
 
 from .widgets import SignatureWidget, MessageListWidget
-from .models import WebReference, PostBox, MessageContent
+from .models import WebReference, PostBox, MessageContent, MessageReceiver
 
 
 class ReferenceForm(forms.ModelForm):
@@ -135,6 +135,7 @@ class PostBoxForm(forms.ModelForm):
             del self.fields["message_list"]
 
         if scope in {"add", "update", "export"}:
+            # list valid connected key objects (pubkeyhash=)
             self.fields["keys"].queryset = \
                 self.fields["keys"].queryset.filter(
                     associated_rel__info__contains="\x1epubkeyhash="
@@ -197,6 +198,7 @@ class PostBoxForm(forms.ModelForm):
 class MessageForm(forms.ModelForm):
     own_hash = forms.CharField(required=False, initial="")
     fetch_url = forms.CharField(disabled=True, initial="")
+    was_retrieved = forms.BooleanField(disabled=True, initial=False)
 
     class Meta:
         model = MessageContent
@@ -214,17 +216,34 @@ class MessageForm(forms.ModelForm):
                     ),
                     self.instance.associated.token
                 )
+            self.initial["was_retrieved"] = \
+                self.instance.receivers.filter(
+                    received=True
+                ).exists()
         else:
             del self.fields["fetch_url"]
+            del self.fields["was_retrieved"]
+            self.initial["was_retrieved"] = False
 
     def _save_m2m(self):
         super()._save_m2m()
-        #
-        for h in self.instance.key_list.keys():
-            self.instance.copies.create(
-                keyhash=h, received=(h == self.cleaned_data["own_hash"])
+        if self.has_changed():
+            for h in self.instance.key_list.keys():
+                self.instance.copies.update_or_create(
+                    defaults={
+                        "received": (h == self.cleaned_data["own_hash"])
+                    }, keyhash=h
+                )
+            self.instance.receivers.bulk_create(
+                map(
+                    lambda utoken: MessageReceiver(utoken=utoken),
+                    self.data.getlist("utokens")
+                ), ignore_conflicts=True
             )
-        for utoken in self.data.getlist("utokens"):
-            self.instance.receivers.create(
-                utoken=utoken
-            )
+
+    def is_valid(self):
+        # cannot update retrieved message
+        if self.initial["was_retrieved"]:
+            return False
+
+        return super().is_valid()

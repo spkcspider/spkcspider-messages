@@ -75,6 +75,10 @@ send_parser.add_argument(
     nargs="?", default=sys.stdin.buffer
 )
 send_parser.add_argument(
+    '--stealth', help="Don't save sender or source key hashes",
+    action="store_true"
+)
+send_parser.add_argument(
     'dest', action="store", help='Destination url'
 )
 
@@ -92,17 +96,92 @@ def replace_action(url, action):
     )
 
 
-def action_send(argv, pkey, pkey_hash, session, response, src_keys):
-    g_src = Graph()
-    g_src.parse(data=response.content, format="turtle")
-    component_url = g_src.value(
+def analyze_src(graph):
+    component_uriref = graph.value(
         predicate=spkcgraph["create:name"], object=Literal(
             "MessageContent", datatype=XSD.string
         )
     )
-    if not component_url:
-        parser.exit(1, "Source does not support action, logged in?\n")
-    component_url = merge_get_url(component_url, raw="true")
+    # src_postbox_url = merge_get_url(src_postbox_url, raw="true")
+    options = {}
+    for i in graph.query(
+        """
+            SELECT ?key ?value
+            WHERE {
+                ?postbox spkc:type ?postbox_type.
+                ?postbox spkc:properties ?base .
+                ?base spkc:name ?key ;
+                      spkc:value ?value .
+            }
+        """,
+        initNs={"spkc": spkcgraph},
+        initBindings={
+            "postbox_type": Literal(
+                "PostBox", datatype=XSD.string
+            )
+        }
+    ):
+        if isinstance(i.value, Literal):
+            options[str(i.key)] = i.value.value
+
+    return component_uriref, options
+
+
+def analyse_dest(graph):
+    postbox_uriref = graph.value(
+        predicate=spkcgraph["ability:name"],
+        object=Literal("push_webref", datatype=XSD.string)
+    )
+    if not postbox_uriref:
+        return None, None, {}, None
+        # parser.exit(1, "dest does not support push_webref ability\n")
+    webref_url = replace_action(str(postbox_uriref), "push_webref/")
+    # response_dest = session.get(
+    #     merge_get_url(webref_url, raw="embed")
+    # )
+    # if not response_dest.ok:
+    #    logger.info("Dest returned error: %s", response_dest.text)
+    #     parser.exit(1, "url invalid\n")
+    # g_dest = Graph()
+    # g_dest.parse(data=response_dest.content, format="turtle")
+
+    domain_keys = {}
+
+    for i in graph.query(
+        """
+            SELECT
+            ?postbox_value ?value ?key_name ?key_value
+            WHERE {
+                ?postbox spkc:properties ?base_prop .
+                ?base_prop spkc:name ?postbox_name ;
+                           spkc:value ?postbox_value .
+                ?postbox_value spkc:properties ?key_base_prop .
+                ?key_base_prop spkc:name ?key_name ;
+                               spkc:value ?key_value .
+            }
+        """,
+        initNs={"spkc": spkcgraph},
+        initBindings={
+            "postbox": postbox_uriref,
+            "postbox_name": Literal(
+                "signatures", datatype=XSD.string
+            )
+        }
+    ):
+        domain_keys.setdefault(str(i.postbox_value), {})
+        domain_keys[str(i.postbox_value)][str(i.key_name)] = i.key_value.value
+    hash_algo = getattr(
+        hashes, next(iter(domain_keys.values()))["hash_algorithm"].upper()
+    )()
+    return postbox_uriref, webref_url, domain_keys, hash_algo
+
+
+def action_send(argv, pkey, pkey_hash, session, response, src_keys):
+    g_src = Graph()
+    g_src.parse(data=response.content, format="turtle")
+    component_uriref, src_options = analyze_src(g_src)
+    if not component_uriref:
+        parser.exit(1, "Source cannot create messages, logged in?")
 
     dest_url = merge_get_url(argv.dest, raw="embed", info="_type=PostBox")
     response_dest = session.get(dest_url)
@@ -111,50 +190,11 @@ def action_send(argv, pkey, pkey_hash, session, response, src_keys):
         parser.exit(1, "retrieval failed, invalid url?\n")
     dest = {}
     g_dest = Graph()
-    g_dest.parse(data=response.content, format="turtle")
-
-    postbox_url = g_dest.value(
-        predicate=spkcgraph["ability:name"],
-        object=Literal("push_webref", datatype=XSD.string)
-    )
-    if not postbox_url:
-        parser.exit(1, "dest does not support push_webref ability\n")
-    webref_url = replace_action(postbox_url, "push_webref/")
-    response_dest = session.get(
-        merge_get_url(webref_url, raw="embed")
-    )
-    if not response_dest.ok:
-        logger.info("Dest returned error: %s", response_dest.text)
-        parser.exit(1, "url invalid\n")
-    g_dest = Graph()
     g_dest.parse(data=response_dest.content, format="turtle")
+    dest_postbox_url, webref_url, dest, dest_hash = analyse_dest(g_dest)
 
-    for i in g_src.query(
-        """
-            SELECT
-            ?postbox_value ?postbox_value ?key_name ?key_value
-            WHERE {
-                ?base spkc:name ?postbox_name .
-                ?base spkc:value ?postbox_value .
-                ?postbox_value spkc:properties ?key_base_prop .
-                ?key_base_prop spkc:name ?key_name .
-                ?key_base_prop spkc:value ?key_value .
-            }
-        """,
-        initNs={"spkc": spkcgraph},
-        initBindings={
-            "postbox_name": Literal(
-                "signatures", datatype=XSD.string
-            )
-        }
-    ):
-        dest.setdefault(str(i.postbox_value), {})
-        dest[str(i.postbox_value)][str(i.key_name)] = i.key_value
-    dest_hash = getattr(
-        hashes, next(iter(dest.values()))["hash_algorithm"].upper()
-    )()
-    bdomain = postbox_url.split("?", 1)[0]
-    result_dest, errored, dest_keys = argv.attestation.check(
+    bdomain = dest_postbox_url.split("?", 1)[0]
+    result_dest, _, dest_keys = argv.attestation.check(
         bdomain,
         map(
             lambda x: (x["key"], x["signature"]),
@@ -181,8 +221,22 @@ def action_send(argv, pkey, pkey_hash, session, response, src_keys):
     nonce = os.urandom(20)
     src_key_list = {}
     dest_key_list = {}
-    for k in src_keys:
-        enc = k[1].encrypt(
+    if argv.stealth:
+        pass
+    elif src_options["shared"]:
+        for k in src_keys:
+            enc = k[1].encrypt(
+                aes_key,
+                padding.OAEP(
+                    mgf=padding.MGF1(algorithm=argv.src_hash_algo),
+                    algorithm=argv.src_hash_algo, label=None
+                )
+            )
+            # encrypt decryption key
+            src_key_list[k[0].hex()] = \
+                base64.urlsafe_b64encode(enc).decode("ascii")
+    else:
+        enc = pkey.public_key().encrypt(
             aes_key,
             padding.OAEP(
                 mgf=padding.MGF1(algorithm=argv.src_hash_algo),
@@ -190,7 +244,7 @@ def action_send(argv, pkey, pkey_hash, session, response, src_keys):
             )
         )
         # encrypt decryption key
-        src_key_list[k[0].hex()] = \
+        src_key_list[pkey_hash] = \
             base64.urlsafe_b64encode(enc).decode("ascii")
 
     for k in dest_keys:
@@ -212,7 +266,7 @@ def action_send(argv, pkey, pkey_hash, session, response, src_keys):
     )
     # remove raw as we parse html
     message_create_url = merge_get_url(
-        replace_action(component_url, "add/MessageContent/"), raw=None
+        replace_action(str(component_uriref), "add/MessageContent/"), raw=None
     )
     response = session.get(
         message_create_url, headers={
@@ -305,7 +359,8 @@ def action_view(argv, pkey, pkey_hash, session, response):
                 }
             )
         if not response.ok:
-            exit(0, "message not found")
+            logger.info("Message retrievel failed: %s", response.text)
+            parser.exit(0, "message not found\n")
         # own_key_hash = getattr(
         #     hashes, response.headers["X-KEYHASH-ALGO"].upper()
         # )()
