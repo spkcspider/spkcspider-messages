@@ -300,6 +300,10 @@ class WebReference(models.Model):
         return ret
 
     def access_message(self, kwargs):
+        try:
+            self.cached_content.size
+        except ValueError:
+            self.cached_size = None
         if self.cached_size is None:
             params, inline_domain = get_requests_params(self.url)
             if inline_domain:
@@ -313,7 +317,7 @@ class WebReference(models.Model):
                             )
                         ), SERVER_NAME=inline_domain
                     )
-                    if resp.status_code < 400:
+                    if resp.status_code == 200:
                         c_length = resp.get("content-length", None)
                         max_length = getattr(
                             settings, "SPIDER_MAX_FILE_SIZE", None
@@ -337,6 +341,12 @@ class WebReference(models.Model):
                         self.cached_size = written_size
                         # updates also cached_size
                         self.cached_content.save("", File(fp))
+                    else:
+                        logging.info(
+                            "file retrieval failed: \"%s\" failed",
+                            self.url
+                        )
+                        return HttpResponse("other error", status=502)
                 except ValidationError as exc:
                     logging.info(
                         "Quota exceeded", exc_info=exc
@@ -400,6 +410,7 @@ class WebReference(models.Model):
                         self.url, exc_info=exc
                     )
                     return HttpResponse("other error", status=502)
+            self.refresh_from_db()
 
         ret = CbFileResponse(
             self.cached_content.open("rb")
