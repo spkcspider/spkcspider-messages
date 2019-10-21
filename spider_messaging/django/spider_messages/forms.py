@@ -18,8 +18,8 @@ from spkcspider.apps.spider.fields import JsonField
 
 from spider_messaging.constants import ReferenceType
 
-from .widgets import SignatureWidget, MessageListWidget
-from .models import WebReference, PostBox, MessageContent, MessageReceiver
+from .widgets import SignatureWidget, EntityListWidget
+from .models import WebReference, PostBox, MessageContent
 
 
 class ReferenceForm(forms.ModelForm):
@@ -59,7 +59,7 @@ class ReferenceForm(forms.ModelForm):
 
 class PostBoxForm(forms.ModelForm):
     webreferences = JsonField(
-        widget=MessageListWidget(), disabled=True
+        widget=EntityListWidget(), disabled=True
     )
     setattr(webreferences, "hashable", False)
     setattr(

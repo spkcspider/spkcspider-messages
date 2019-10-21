@@ -1,9 +1,9 @@
 {% load spider_rdf %}
 <data {% include "django/forms/widgets/attrs.html" %} hidden="hidden">
-  {% for message in widget.value %}
+  {% for item in widget.value %}
     <data hidden="hidden" typeof="spkc:Entity">
       <data hidden="hidden" rel="spkc:properties">
-        {% for d in message.items %}
+        {% for d in item.items %}
           {% literalize d.1 as LiteralData %}
           <data hidden="hidden" typeof="spkc:Property">
             <data hidden="hidden" property="spkc:name" datatype="xsd:string">{{d.0}}</data>

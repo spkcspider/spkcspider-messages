@@ -253,6 +253,9 @@ class WebReference(models.Model):
     url = models.URLField(max_length=600)
     rtype = models.CharField(max_length=1)
     created = models.DateTimeField(auto_now_add=True, editable=False)
+    # note: the name: webreferences is used for displaying references
+    # never lay both together as django will try to set
+    # references which is not possible with the webreference format
     postbox = models.ForeignKey(
         PostBox, related_name="references", on_delete=models.CASCADE
     )
