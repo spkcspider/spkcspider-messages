@@ -2,6 +2,7 @@ __all__ = [
     "PostBox", "WebReference", "WebReferenceCopy", "MessageContent",
     "MessageCopy", "MessageReceiver"
 ]
+from urllib.parse import urljoin
 import json
 import posixpath
 import logging
@@ -24,13 +25,21 @@ from django.test import Client
 
 from jsonfield import JSONField
 
-from rdflib import Literal, BNode
+
+from rdflib import Literal, Graph, BNode, URIRef
 import requests
 
+
+from spkcspider.apps.spider.serializing import (
+    paginate_stream, serialize_stream
+)
+from spkcspider.apps.spider.queryfilters import info_or
+from spkcspider.apps.spider.models import AssignedContent
 from spkcspider.utils.urls import merge_get_url
 from spkcspider.utils.security import create_b64_token
 from spkcspider.utils.fields import add_property, literalize
 from spkcspider.constants import VariantType, spkcgraph
+
 
 from spkcspider.apps.spider.contents import BaseContent, add_content
 from spkcspider.apps.spider.conf import TOKEN_SIZE, get_requests_params
@@ -192,11 +201,54 @@ class PostBox(BaseContent):
         return set()
 
     def access_get_shared(self, **kwargs):
-        messages = MessageContent.objects.filter(
-            associated_rel__attached_to_content=self,
-            associated_rel__ctype__name="MessageContent",
-            copies__keyhash__in=kwargs["request"].POST.getlist("own_keyhash")
+        messages = AssignedContent.objects.filter(
+            info_or(
+                hash=kwargs["request"].POST.getlist("own_hash")
+            ),
+            attached_to_content=self,
+            ctype__name="MessageContent"
         )
+        session_dict = {
+            "request": kwargs["request"],
+            "context": kwargs,
+            "scope": kwargs["scope"],
+            "hostpart": kwargs["hostpart"],
+            "domainauth_url": kwargs["domainauth_url"],
+            "ac_namespace": spkcgraph["contents"],
+            "sourceref": URIRef(urljoin(
+                kwargs["hostpart"], kwargs["request"].path
+            ))
+        }
+
+        g = Graph()
+        g.namespace_manager.bind("spkc", spkcgraph, replace=True)
+
+        p = paginate_stream(
+            messages,
+            getattr(
+                settings, "SPIDER_SERIALIZED_PER_PAGE",
+                settings.SPIDER_OBJECTS_PER_PAGE
+            ),
+            settings.SPIDER_MAX_EMBED_DEPTH
+        )
+
+        page = 1
+        try:
+            page = int(session_dict["request"].GET.get("page", "1"))
+        except Exception:
+            pass
+        serialize_stream(
+            g, p, session_dict,
+            page=page,
+            embed=False
+        )
+        ret = HttpResponse(
+            g.serialize(format="turtle"),
+            content_type="text/turtle;charset=utf-8"
+        )
+        # allow cors requests for raw
+        ret["Access-Control-Allow-Origin"] = "*"
+        return ret
 
     @csrf_exempt
     def access_push_webref(self, **kwargs):
