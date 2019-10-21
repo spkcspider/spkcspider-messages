@@ -48,6 +48,8 @@ def UpdateKeysCb(sender, instance, action, **kwargs):
         return
     WebReferenceCopy = apps.get_model("spider_messages", "WebReferenceCopy")
     WebReference = apps.get_model("spider_messages", "WebReference")
+    MessageCopy = apps.get_model("spider_messages", "MessageCopy")
+    MessageContent = apps.get_model("spider_messages", "MessageContent")
     q = models.Q()
     for i in instance.keys.all():
         q |= models.Q(
@@ -56,9 +58,17 @@ def UpdateKeysCb(sender, instance, action, **kwargs):
     WebReferenceCopy.objects.filter(
         ref__postbox=instance
     ).exclude(q).delete()
-    # remove completed
+    # remove old, completed webreferences
     WebReference.objects.exclude(
         copies__received=False
+    ).delete()
+    MessageCopy.objects.filter(
+        ref__associated_rel__attached_to_content=instance
+    ).exclude(q).delete()
+    # remove old, completed message contents
+    MessageContent.objects.exclude(
+        models.Q(copies__received=False) |
+        models.Q(receivers__received=False)
     ).delete()
 
 

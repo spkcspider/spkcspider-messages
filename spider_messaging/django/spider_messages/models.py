@@ -122,7 +122,7 @@ class PostBox(BaseContent):
     #    ]
 
     def map_data(self, name, field, data, graph, context):
-        if name == "message_list":
+        if name == "webreferences":
             # per node create a message anonymous Node
             ret = BNode()
             for nname, val in data.items():
@@ -496,6 +496,7 @@ class MessageCopy(models.Model):
     content = models.ForeignKey(
         MessageContent, related_name="copies", on_delete=models.CASCADE
     )
+    # cleaned up on updates via signals, see
     keyhash = models.CharField(max_length=200)
     received = models.BooleanField(default=False, blank=True)
 

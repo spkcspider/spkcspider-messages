@@ -58,14 +58,14 @@ class ReferenceForm(forms.ModelForm):
 
 
 class PostBoxForm(forms.ModelForm):
-    message_list = JsonField(
+    webreferences = JsonField(
         widget=MessageListWidget(), disabled=True
     )
-    setattr(message_list, "hashable", False)
+    setattr(webreferences, "hashable", False)
     setattr(
-        message_list,
+        webreferences,
         "view_form_field_template",
-        "spider_messages/partials/fields/view_message_list.html"
+        "spider_messages/partials/fields/view_webreferences.html"
     )
     attestation = forms.CharField(
         label=_("PostBox Attestation"), help_text=_(
@@ -109,14 +109,14 @@ class PostBoxForm(forms.ModelForm):
 
     field_order = [
         "only_persistent", "shared", "keys", "attestation",
-        "message_list", "signatures"
+        "webreferences", "signatures"
     ]
 
     def __init__(self, scope, request, **kwargs):
         super().__init__(**kwargs)
         self.initial["hash_algorithm"] = settings.SPIDER_HASH_ALGORITHM.name
         if scope in {"view", "raw", "list"} and request.is_owner:
-            self.initial["message_list"] = [
+            self.initial["webreferences"] = [
                 {
                     "id": i.id,
                     "size": i.cached_size,
@@ -124,7 +124,7 @@ class PostBoxForm(forms.ModelForm):
                 } for i in self.instance.references.all()
             ]
         elif scope == "export":
-            self.initial["message_list"] = [
+            self.initial["webreferences"] = [
                 {
                     "key_list": i.key_list,
                     "rtype": i.rtype,
@@ -132,7 +132,7 @@ class PostBoxForm(forms.ModelForm):
                 } for i in self.instance.references.all()
             ]
         else:
-            del self.fields["message_list"]
+            del self.fields["webreferences"]
 
         if scope in {"add", "update", "export"}:
             # list valid connected key objects (pubkeyhash=)
@@ -199,6 +199,7 @@ class MessageForm(forms.ModelForm):
     own_hash = forms.CharField(required=False, initial="")
     fetch_url = forms.CharField(disabled=True, initial="")
     was_retrieved = forms.BooleanField(disabled=True, initial=False)
+    first_run = False
 
     class Meta:
         model = MessageContent
@@ -220,30 +221,55 @@ class MessageForm(forms.ModelForm):
                 self.instance.receivers.filter(
                     received=True
                 ).exists()
+            self.fields["key_list"].disabled = True
+            self.first_run = False
         else:
             del self.fields["fetch_url"]
             del self.fields["was_retrieved"]
             self.initial["was_retrieved"] = False
+            self.first_run = True
 
     def _save_m2m(self):
         super()._save_m2m()
-        if self.has_changed():
+        changed_data = self.changed_data
+        # create or update keys
+        if (
+            "key_list" in changed_data or "encrypted_content" in changed_data
+        ):
             for h in self.instance.key_list.keys():
                 self.instance.copies.update_or_create(
                     defaults={
                         "received": (h == self.cleaned_data["own_hash"])
                     }, keyhash=h
                 )
-            self.instance.receivers.bulk_create(
-                map(
-                    lambda utoken: MessageReceiver(utoken=utoken),
-                    self.data.getlist("utokens")
-                ), ignore_conflicts=True
-            )
+        # don't allow new tokens after the first run
+        if self.first_run:
+            for utoken in self.data.getlist("utokens"):
+                self.instance.receivers.update_or_create(
+                    utoken=utoken
+                )
+
+    def clean(self):
+        super().clean()
+        if self.first_run:
+            postbox = \
+                self.instance.associated.usercomponent.contents.filter(
+                    ctype__name="PostBox"
+                ).first()
+            if postbox:
+                self.instance.associated.attached_to_content = postbox
+            else:
+                self.add_error(None, forms.ValidationError(
+                    _("This usercomponent has no Postbox")
+                ))
+        return self.cleaned_data
 
     def is_valid(self):
         # cannot update retrieved message
-        if self.initial["was_retrieved"]:
+        if (
+            self.initial["was_retrieved"] and
+            "encrypted_content" in self.changed_data
+        ):
             return False
 
         return super().is_valid()

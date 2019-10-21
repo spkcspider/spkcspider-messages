@@ -397,7 +397,7 @@ def action_view(argv, pkey, pkey_hash, session, response):
             initNs={"spkc": spkcgraph},
             initBindings={
                 "search_name": Literal(
-                    "message_list", datatype=XSD.string
+                    "webreferences", datatype=XSD.string
                 )
             }
         ):
@@ -406,10 +406,10 @@ def action_view(argv, pkey, pkey_hash, session, response):
         if len(queried) == 0 and not g_message.value(
             predicate=spkcgraph["name"],
             object=Literal(
-                "message_list", datatype=XSD.string
+                "webreferences", datatype=XSD.string
             )
         ):
-            parser.exit(1, "messages not found; logged in?\n")
+            parser.exit(1, "message references not found; logged in?\n")
         print("Messages:")
         for i in sorted(queried.values(), key=lambda x: x["id"]):
             print(i["id"], i["sender"])

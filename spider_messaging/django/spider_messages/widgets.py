@@ -62,7 +62,7 @@ class SignatureWidget(widgets.Textarea):
 
 
 class MessageListWidget(widgets.Widget):
-    template_name = "spider_messages/forms/widgets/message_list_widget.html"
+    template_name = "spider_messages/forms/widgets/webreferences_widget.html"
     input_type = None
 
     def format_value(self, value):
