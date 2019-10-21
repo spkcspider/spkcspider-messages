@@ -199,6 +199,7 @@ class MessageForm(forms.ModelForm):
     own_hash = forms.CharField(required=False, initial="")
     fetch_url = forms.CharField(disabled=True, initial="")
     was_retrieved = forms.BooleanField(disabled=True, initial=False)
+    has_changed = forms.BooleanField(disabled=True, initial=False)
     first_run = False
 
     class Meta:
@@ -222,10 +223,12 @@ class MessageForm(forms.ModelForm):
                     received=True
                 ).exists()
             self.fields["key_list"].disabled = True
+            self.fields["key_list"]
             self.first_run = False
         else:
             del self.fields["fetch_url"]
             del self.fields["was_retrieved"]
+            del self.fields["has_changed"]
             self.initial["was_retrieved"] = False
             self.first_run = True
 

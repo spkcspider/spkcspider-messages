@@ -191,6 +191,13 @@ class PostBox(BaseContent):
             return {"push_webref"}
         return set()
 
+    def access_get_shared(self, **kwargs):
+        messages = MessageContent.objects.filter(
+            associated_rel__attached_to_content=self,
+            associated_rel__ctype__name="MessageContent",
+            copies__keyhash__in=kwargs["request"].POST.getlist("own_keyhash")
+        )
+
     @csrf_exempt
     def access_push_webref(self, **kwargs):
         from .forms import ReferenceForm
@@ -468,7 +475,11 @@ class MessageContent(BaseContent):
         return -10
 
     def get_info(self):
-        return super().get_info(unlisted=True)
+        ret = super().get_info(unlisted=True)
+
+        return "%s%s\x1e" % (
+            ret, "\x1ehash=".join(self.key_list.keys())
+        )
 
     def get_form(self, scope):
         from .forms import MessageForm
