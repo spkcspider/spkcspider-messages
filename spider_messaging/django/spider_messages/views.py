@@ -1,5 +1,7 @@
 __all__ = ("MessageContentView",)
 
+import json
+
 from django.http import Http404
 
 from django.views.decorators.csrf import csrf_exempt
@@ -18,11 +20,12 @@ _empty_set = frozenset()
 
 class MessageContentView(UserTestMixin, View):
     model = MessageContent
+    request = None
 
     @method_decorator(csrf_exempt)
     def dispatch(self, request, *args, **kwargs):
+        self.request = request
         try:
-            self.utoken = self.request.GET.get("utoken", "")
             obj = self.get_object()
             self.usercomponent = obj.usercomponent
             self.object = obj.content
@@ -45,10 +48,18 @@ class MessageContentView(UserTestMixin, View):
             raise Http404()
 
     def test_func(self):
-        self.receivers = self.object.receivers.filter(
-            utoken=self.utoken
-        )
-        return self.receivers.exists()
+        if self.request.is_owner and self.request.POST.get("own_keyhash"):
+            self.copies = self.object.copies.filter(
+                keyhash__in=self.request.POST.getlist("own_keyhash")
+            )
+            self.receivers = self.object.receivers.none()
+
+        else:
+            self.receivers = self.object.receivers.filter(
+                utoken__in=self.request.GET.getlist("utoken")
+            )
+            self.copies = self.object.copies.none()
+        return self.receivers.exists() or self.copies.exists()
 
     def get(self, request, *args, **kwargs):
         ret = CbFileResponse(
@@ -58,6 +69,9 @@ class MessageContentView(UserTestMixin, View):
         # don't add key-list; it is just for own keys
         ret["content-length"] = self.object.encrypted_content.size
         ret.msgreceivers = self.receivers
+        ret.copies = self.copies
+        if ret.copies:
+            ret["X-KEYLIST"] = json.dumps(self.key_list)
         return ret
 
     def options(self, request, *args, **kwargs):

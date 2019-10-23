@@ -12,8 +12,8 @@ _feature_update_actions = frozenset({"post_add", "post_remove", "post_clear"})
 
 def SuccessMessageContentsCb(sender, response, **kwargs):
     if (
-        not hasattr(response, "msgreceivers") and
-        not hasattr(response, "msgcopies")
+        not getattr(response, "msgreceivers", None) and
+        not getattr(response, "msgcopies", None)
     ):
         return
     MessageContent = apps.get_model("spider_messages", "MessageContent")
