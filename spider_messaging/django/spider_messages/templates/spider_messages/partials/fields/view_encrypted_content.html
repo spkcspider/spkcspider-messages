@@ -6,7 +6,7 @@
   <data hidden="hidden" property="spkc:hashable" datatype="xsd:boolean">{{hashable}}</data>
   <div>{{ field.label_tag }}</div>
   {% literalize field.download_url as LiteralData %}
-  <span style="{{extra_style_field}}">
+  <span>
     <data hidden="hidden" property="spkc:value" datatype="{{LiteralData.datatype}}" content="{{LiteralData}}"></data>
     <a class="w3-white" href="{{LiteralData}}" resource="">{{field|field_to_python|default_if_none:""}}</a>
   </span>

@@ -10,7 +10,6 @@ from django.conf import settings
 from django.db.models import Q
 from django.urls import reverse
 from django.utils.translation import gettext as _
-from spkcspider.apps.spider.conf import get_anchor_domain, get_anchor_scheme
 from spkcspider.apps.spider.fields import ContentMultipleChoiceField, JsonField
 from spkcspider.apps.spider.models import AssignedContent
 from spkcspider.apps.spider.queryfilters import info_or
@@ -232,8 +231,8 @@ class MessageForm(forms.ModelForm):
         if self.instance.id:
             self.initial["fetch_url"] = \
                 "{}://{}{}?urlpart={}/view".format(
-                    get_anchor_scheme(),
-                    get_anchor_domain(),
+                    request.scheme,
+                    request.get_host(),
                     reverse(
                         "spider_messages:message"
                     ),
