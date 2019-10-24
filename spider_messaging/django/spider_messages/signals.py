@@ -2,8 +2,8 @@ __all__ = [
     "SuccessMessageContentsCb", "SuccessReferenceCb", "UpdateKeysCb"
 ]
 
-from django.db import models
 from django.apps import apps
+from django.db import models
 from django.dispatch import Signal
 
 successful_transmitted = Signal(providing_args=["response"])

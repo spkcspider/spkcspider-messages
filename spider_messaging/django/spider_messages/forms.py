@@ -1,25 +1,22 @@
 __all__ = ["ReferenceForm", "PostBoxForm", "MessageForm"]
 
-import re
-import binascii
 import base64
+import binascii
 import json
+import re
 
+from django import forms
 from django.conf import settings
 from django.db.models import Q
-from django import forms
 from django.urls import reverse
 from django.utils.translation import gettext as _
-
-
-from spkcspider.apps.spider.conf import get_anchor_domain, get_anchor_scheme
-from spkcspider.utils.security import get_hashob
-from spkcspider.apps.spider.fields import JsonField
-
 from spider_messaging.constants import ReferenceType
+from spkcspider.apps.spider.conf import get_anchor_domain, get_anchor_scheme
+from spkcspider.apps.spider.fields import JsonField
+from spkcspider.utils.security import get_hashob
 
-from .widgets import SignatureWidget, EntityListWidget
-from .models import WebReference, PostBox, MessageContent
+from .models import MessageContent, PostBox, WebReference
+from .widgets import EntityListWidget, SignatureWidget
 
 
 class ReferenceForm(forms.ModelForm):
@@ -64,6 +61,15 @@ class PostBoxForm(forms.ModelForm):
     setattr(webreferences, "hashable", False)
     setattr(
         webreferences,
+        "view_form_field_template",
+        "spider_messages/partials/fields/view_webreferences.html"
+    )
+    message_objects = JsonField(
+        widget=EntityListWidget(), disabled=True
+    )
+    setattr(message_objects, "hashable", False)
+    setattr(
+        message_objects,
         "view_form_field_template",
         "spider_messages/partials/fields/view_webreferences.html"
     )

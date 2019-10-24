@@ -1,12 +1,11 @@
 __all__ = ["SpiderPostbox", "POP3Factory"]
 
 import requests
-from twisted.mail import smtp
-from twisted.mail import pop3
-from .core import startTLSFactory
 
-
+from twisted.mail import pop3, smtp
 from zope.interface import implementer
+
+from .core import startTLSFactory
 
 
 @implementer(pop3.IMailbox)

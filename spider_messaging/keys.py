@@ -3,10 +3,10 @@ __all__ = ["load_public_key", "load_priv_key"]
 import getpass
 
 from cryptography.hazmat.backends import default_backend
-from cryptography.hazmat.primitives.serialization import load_pem_public_key
+from cryptography.hazmat.primitives.serialization import (
+    load_pem_private_key, load_pem_public_key
+)
 from cryptography.x509 import load_pem_x509_certificate
-from cryptography.hazmat.primitives.serialization import load_pem_private_key
-
 
 defbackend = default_backend()
 

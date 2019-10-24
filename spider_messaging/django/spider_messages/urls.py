@@ -1,6 +1,5 @@
 from django.urls import path
 
-
 from .views import MessageContentView
 
 app_name = "spider_messages"

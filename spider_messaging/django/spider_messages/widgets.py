@@ -2,10 +2,9 @@ __all__ = ["SignatureWidget", "EntityListWidget"]
 
 import json
 
-from django.forms import widgets
 from django.conf import settings
+from django.forms import widgets
 from django.utils.translation import gettext_lazy as _
-
 
 _extra = '' if settings.DEBUG else '.min'
 

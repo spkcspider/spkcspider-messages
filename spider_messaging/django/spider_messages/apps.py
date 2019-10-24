@@ -1,11 +1,11 @@
 __all__ = ["SpiderMessagesConfig"]
 
 from django.apps import AppConfig
-from django.db.models.signals import post_delete, m2m_changed
+from django.db.models.signals import m2m_changed, post_delete
 
 from .signals import (
-    SuccessReferenceCb, SuccessMessageContentsCb, DeleteFileCb,
-    successful_transmitted, UpdateKeysCb
+    DeleteFileCb, SuccessMessageContentsCb, SuccessReferenceCb, UpdateKeysCb,
+    successful_transmitted
 )
 
 

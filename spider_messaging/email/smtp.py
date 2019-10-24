@@ -1,9 +1,8 @@
 __all__ = ["SpiderDelivery", "SMTPFactory"]
 
 
-from twisted.mail import smtp
 from twisted.internet import defer
-
+from twisted.mail import smtp
 from zope.interface import implementer
 
 from .core import startTLSFactory

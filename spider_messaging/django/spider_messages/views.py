@@ -3,17 +3,15 @@ __all__ = ("MessageContentView",)
 import json
 
 from django.http import Http404
-
-from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
 from django.views import View
-
+from django.views.decorators.csrf import csrf_exempt
+from spkcspider.apps.spider.models import AssignedContent
 from spkcspider.apps.spider.views import UserTestMixin
 from spkcspider.utils.settings import get_settings_func
-from spkcspider.apps.spider.models import AssignedContent
 
-from .models import MessageContent
 from .http import CbFileResponse
+from .models import MessageContent
 
 _empty_set = frozenset()
 

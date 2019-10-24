@@ -2,49 +2,38 @@ __all__ = [
     "PostBox", "WebReference", "WebReferenceCopy", "MessageContent",
     "MessageCopy", "MessageReceiver"
 ]
-from urllib.parse import urljoin
 import json
-import posixpath
 import logging
+import posixpath
+from urllib.parse import urljoin
 
+import requests
+from rdflib import BNode, Graph, Literal, URIRef
 
-from django.db import models
-
-from django.http import (
-    HttpResponse, HttpResponsePermanentRedirect
-)
 from django.conf import settings
-from django.utils.translation import pgettext, gettext_lazy as _
+from django.core.exceptions import ValidationError
+from django.core.files import File
 from django.core.files.storage import default_storage
 from django.core.files.temp import NamedTemporaryFile
-from django.core.files import File
-from django.core.exceptions import ValidationError
-from django.views.decorators.csrf import csrf_exempt
+from django.db import models
+from django.http import HttpResponse, HttpResponsePermanentRedirect
 from django.test import Client
-
-
+from django.utils.translation import gettext_lazy as _
+from django.utils.translation import pgettext
+from django.views.decorators.csrf import csrf_exempt
 from jsonfield import JSONField
-
-
-from rdflib import Literal, Graph, BNode, URIRef
-import requests
-
-
+from spider_messaging.constants import ReferenceType
+from spkcspider.apps.spider.conf import TOKEN_SIZE, get_requests_params
+from spkcspider.apps.spider.contents import BaseContent, add_content
+from spkcspider.apps.spider.models import AssignedContent
+from spkcspider.apps.spider.queryfilters import info_or
 from spkcspider.apps.spider.serializing import (
     paginate_stream, serialize_stream
 )
-from spkcspider.apps.spider.queryfilters import info_or
-from spkcspider.apps.spider.models import AssignedContent
-from spkcspider.utils.urls import merge_get_url
-from spkcspider.utils.security import create_b64_token
-from spkcspider.utils.fields import add_property, literalize
 from spkcspider.constants import VariantType, spkcgraph
-
-
-from spkcspider.apps.spider.contents import BaseContent, add_content
-from spkcspider.apps.spider.conf import TOKEN_SIZE, get_requests_params
-
-from spider_messaging.constants import ReferenceType
+from spkcspider.utils.fields import add_property, literalize
+from spkcspider.utils.security import create_b64_token
+from spkcspider.utils.urls import merge_get_url
 
 from .http import CbFileResponse
 

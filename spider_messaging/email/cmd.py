@@ -2,7 +2,6 @@ __all__ = ["parser"]
 
 import argparse
 
-
 parser = argparse.ArgumentParser(
     description='Run email2spkcspider pipeline'
 )
