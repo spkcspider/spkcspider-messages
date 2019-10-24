@@ -5,11 +5,8 @@ __all__ = [
 import json
 import logging
 import posixpath
-from urllib.parse import urljoin
 
 import requests
-from rdflib import BNode, Graph, Literal, URIRef
-
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.files import File
@@ -22,18 +19,15 @@ from django.utils.translation import gettext_lazy as _
 from django.utils.translation import pgettext
 from django.views.decorators.csrf import csrf_exempt
 from jsonfield import JSONField
-from spider_messaging.constants import ReferenceType
+from rdflib import XSD, BNode, Literal
 from spkcspider.apps.spider.conf import TOKEN_SIZE, get_requests_params
 from spkcspider.apps.spider.contents import BaseContent, add_content
-from spkcspider.apps.spider.models import AssignedContent
-from spkcspider.apps.spider.queryfilters import info_or
-from spkcspider.apps.spider.serializing import (
-    paginate_stream, serialize_stream
-)
 from spkcspider.constants import VariantType, spkcgraph
 from spkcspider.utils.fields import add_property, literalize
 from spkcspider.utils.security import create_b64_token
 from spkcspider.utils.urls import merge_get_url
+
+from spider_messaging.constants import ReferenceType
 
 from .http import CbFileResponse
 
@@ -188,56 +182,6 @@ class PostBox(BaseContent):
         ):
             return {"push_webref"}
         return set()
-
-    def access_get_shared(self, **kwargs):
-        messages = AssignedContent.objects.filter(
-            info_or(
-                hash=kwargs["request"].POST.getlist("own_hash")
-            ),
-            attached_to_content=self,
-            ctype__name="MessageContent"
-        )
-        session_dict = {
-            "request": kwargs["request"],
-            "context": kwargs,
-            "scope": kwargs["scope"],
-            "hostpart": kwargs["hostpart"],
-            "domainauth_url": kwargs["domainauth_url"],
-            "ac_namespace": spkcgraph["contents"],
-            "sourceref": URIRef(urljoin(
-                kwargs["hostpart"], kwargs["request"].path
-            ))
-        }
-
-        g = Graph()
-        g.namespace_manager.bind("spkc", spkcgraph, replace=True)
-
-        p = paginate_stream(
-            messages,
-            getattr(
-                settings, "SPIDER_SERIALIZED_PER_PAGE",
-                settings.SPIDER_OBJECTS_PER_PAGE
-            ),
-            settings.SPIDER_MAX_EMBED_DEPTH
-        )
-
-        page = 1
-        try:
-            page = int(session_dict["request"].GET.get("page", "1"))
-        except Exception:
-            pass
-        serialize_stream(
-            g, p, session_dict,
-            page=page,
-            embed=False
-        )
-        ret = HttpResponse(
-            g.serialize(format="turtle"),
-            content_type="text/turtle;charset=utf-8"
-        )
-        # allow cors requests for raw
-        ret["Access-Control-Allow-Origin"] = "*"
-        return ret
 
     @csrf_exempt
     def access_push_webref(self, **kwargs):
@@ -457,15 +401,13 @@ class WebReference(models.Model):
                         self.url, exc_info=exc
                     )
                     return HttpResponse("other error", status=502)
-            self.refresh_from_db()
 
         ret = CbFileResponse(
             self.cached_content.open("rb")
         )
-        if kwargs["request"].POST.get("keyhash"):
-            ret.refcopies = self.copies.filter(
-                keyhash__in=kwargs["request"].POST.getlist("keyhash")
-            )
+        ret.refcopies = self.copies.filter(
+            keyhash__in=kwargs["request"].POST.getlist("keyhash")
+        )
         ret["X-TYPE"] = kwargs["rtype"].name
         ret["X-KEYLIST"] = json.dumps(self.key_list)
         return ret
@@ -526,22 +468,31 @@ class MessageContent(BaseContent):
         from .forms import MessageForm
         return MessageForm
 
-    # def get_form_kwargs(self, request, **kwargs):
-    #     kwargs["request"] = request
-    #     return super().get_form_kwargs(request=request, **kwargs)
+    def get_form_kwargs(self, request, **kwargs):
+        kwargs["request"] = request
+        return super().get_form_kwargs(request=request, **kwargs)
 
     def access_raw_update(self, **kwargs):
         pass
 
+    def map_data(self, name, field, data, graph, context):
+        if name == "encrypted_content":
+            url = self.associated.get_absolute_url("download")
+            url = "{}{}?{}".format(
+                context["hostpart"], url, context["context"]["sanitized_GET"]
+            )
+            return Literal(url, datatype=XSD.anyURI)
+
+        return super().map_data(name, field, data, graph, context)
+
     @csrf_exempt
-    def access_view(self, **kwargs):
+    def access_download(self, **kwargs):
         ret = CbFileResponse(
             self.cached_content
         )
-        if kwargs["request"].POST.get("keyhash"):
-            ret.msgcopies = self.copies.filter(
-                keyhash__in=kwargs["request"].POST.getlist("keyhash")
-            )
+        ret.msgcopies = self.copies.filter(
+            keyhash__in=kwargs["request"].POST.getlist("keyhash")
+        )
         ret["X-KEYLIST"] = json.dumps(self.key_list)
         return ret
 

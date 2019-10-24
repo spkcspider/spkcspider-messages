@@ -10,10 +10,13 @@ from django.conf import settings
 from django.db.models import Q
 from django.urls import reverse
 from django.utils.translation import gettext as _
-from spider_messaging.constants import ReferenceType
 from spkcspider.apps.spider.conf import get_anchor_domain, get_anchor_scheme
-from spkcspider.apps.spider.fields import JsonField
+from spkcspider.apps.spider.fields import ContentMultipleChoiceField, JsonField
+from spkcspider.apps.spider.models import AssignedContent
+from spkcspider.apps.spider.queryfilters import info_or
 from spkcspider.utils.security import get_hashob
+
+from spider_messaging.constants import ReferenceType
 
 from .models import MessageContent, PostBox, WebReference
 from .widgets import EntityListWidget, SignatureWidget
@@ -56,7 +59,7 @@ class ReferenceForm(forms.ModelForm):
 
 class PostBoxForm(forms.ModelForm):
     webreferences = JsonField(
-        widget=EntityListWidget(), disabled=True
+        widget=EntityListWidget(), disabled=True, required=False
     )
     setattr(webreferences, "hashable", False)
     setattr(
@@ -64,15 +67,12 @@ class PostBoxForm(forms.ModelForm):
         "view_form_field_template",
         "spider_messages/partials/fields/view_webreferences.html"
     )
-    message_objects = JsonField(
-        widget=EntityListWidget(), disabled=True
+    message_objects = ContentMultipleChoiceField(
+        queryset=AssignedContent.objects.filter(
+            ctype__name="MessageContent"
+        ), to_field_name="id", disabled=True, required=False
     )
     setattr(message_objects, "hashable", False)
-    setattr(
-        message_objects,
-        "view_form_field_template",
-        "spider_messages/partials/fields/view_webreferences.html"
-    )
     attestation = forms.CharField(
         label=_("PostBox Attestation"), help_text=_(
             "Re-sign with every active key for activating new key "
@@ -92,7 +92,7 @@ class PostBoxForm(forms.ModelForm):
         "spider_messages/partials/fields/view_combined_keyhash.html"
     )
     hash_algorithm = forms.CharField(
-        widget=forms.HiddenInput(), disabled=True
+        widget=forms.HiddenInput(), disabled=True, required=False
     )
     setattr(hash_algorithm, "hashable", False)
     signatures = JsonField(
@@ -129,6 +129,16 @@ class PostBoxForm(forms.ModelForm):
                     "sender": "%s?..." % i.url.split("?", 1)[0]
                 } for i in self.instance.references.all()
             ]
+            self.fields["message_objects"].queryset = \
+                self.fields["message_objects"].queryset.filter(
+                    attached_to_content=self.instance
+                )
+            keyhashes = request.POST.getlist("keyhash")
+            if self.data.get("view_all", "") != "true" and keyhashes:
+                self.fields["message_objects"].queryset = \
+                    self.fields["message_objects"].queryset.filter(
+                        info_or(hash=keyhashes)
+                    )
         elif scope == "export":
             self.initial["webreferences"] = [
                 {
@@ -137,8 +147,10 @@ class PostBoxForm(forms.ModelForm):
                     "url": i.url
                 } for i in self.instance.references.all()
             ]
+            del self.fields["message_objects"]
         else:
             del self.fields["webreferences"]
+            del self.fields["message_objects"]
 
         if scope in {"add", "update", "export"}:
             # list valid connected key objects (pubkeyhash=)
@@ -203,16 +215,19 @@ class PostBoxForm(forms.ModelForm):
 
 class MessageForm(forms.ModelForm):
     own_hash = forms.CharField(required=False, initial="")
-    fetch_url = forms.CharField(disabled=True, initial="")
-    was_retrieved = forms.BooleanField(disabled=True, initial=False)
-    has_changed = forms.BooleanField(disabled=True, initial=False)
+    fetch_url = forms.CharField(disabled=True, required=False, initial="")
+    was_retrieved = forms.BooleanField(
+        disabled=True, required=False, initial=False
+    )
+    # by own client(s)
+    received = forms.BooleanField(disabled=True, required=False, initial=0)
     first_run = False
 
     class Meta:
         model = MessageContent
         fields = ["encrypted_content", "key_list"]
 
-    def __init__(self, **kwargs):
+    def __init__(self, request, own_url, **kwargs):
         super().__init__(**kwargs)
         if self.instance.id:
             self.initial["fetch_url"] = \
@@ -224,17 +239,28 @@ class MessageForm(forms.ModelForm):
                     ),
                     self.instance.associated.token
                 )
+            setattr(
+                self.fields["encrypted_content"],
+                "download_url",
+                self.instance.associated.get_absolute_url("download")
+            )
             self.initial["was_retrieved"] = \
                 self.instance.receivers.filter(
                     received=True
                 ).exists()
             self.fields["key_list"].disabled = True
-            self.fields["key_list"]
+            self.fields["key_list"].required = False
+            # TODO: maybe use data
+            keyhashes = request.POST.getlist("keyhash")
+            if keyhashes:
+                self.initial["received"] = self.instance.copies.filter(
+                    keyhash__in=keyhashes, received=True
+                ).count() == len(keyhashes)
             self.first_run = False
         else:
             del self.fields["fetch_url"]
             del self.fields["was_retrieved"]
-            del self.fields["has_changed"]
+            del self.fields["received"]
             self.initial["was_retrieved"] = False
             self.first_run = True
 
@@ -245,7 +271,10 @@ class MessageForm(forms.ModelForm):
         if (
             "key_list" in changed_data or "encrypted_content" in changed_data
         ):
+            self.initial["received"] = False
             for h in self.instance.key_list.keys():
+                if h == self.cleaned_data["own_hash"]:
+                    self.initial["received"] = True
                 self.instance.copies.update_or_create(
                     defaults={
                         "received": (h == self.cleaned_data["own_hash"])

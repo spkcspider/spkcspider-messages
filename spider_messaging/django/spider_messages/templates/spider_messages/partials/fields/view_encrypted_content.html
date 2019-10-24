@@ -1,0 +1,13 @@
+{% load spider_rdf i18n %}
+<li typeof="spkc:Property">
+  <data hidden="hidden" property="spkc:fieldname" datatype="xsd:string">{{field.html_name}}</data>
+  <data hidden="hidden" property="spkc:name" datatype="xsd:string">{{field.name}}</data>
+  {% hashable_literalize field as hashable %}
+  <data hidden="hidden" property="spkc:hashable" datatype="xsd:boolean">{{hashable}}</data>
+  <div>{{ field.label_tag }}</div>
+  {% literalize field.download_url as LiteralData %}
+  <span style="{{extra_style_field}}">
+    <data hidden="hidden" property="spkc:value" datatype="{{LiteralData.datatype}}" content="{{LiteralData}}"></data>
+    <a class="w3-white" href="{{LiteralData}}" resource="">{{field|field_to_python|default_if_none:""}}</a>
+  </span>
+</li>
