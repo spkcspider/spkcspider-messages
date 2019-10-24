@@ -243,6 +243,12 @@ class MessageForm(forms.ModelForm):
                 "download_url",
                 self.instance.associated.get_absolute_url("download")
             )
+            setattr(self.fields["encrypted_content"], "hashable", False)
+            setattr(
+                self.fields["encrypted_content"],
+                "view_form_field_template",
+                "spider_messages/partials/fields/view_encrypted_content.html"
+            )
             self.initial["was_retrieved"] = \
                 self.instance.receivers.filter(
                     received=True
