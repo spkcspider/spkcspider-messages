@@ -130,7 +130,7 @@ class PostBoxForm(forms.ModelForm):
             ]
             self.fields["message_objects"].queryset = \
                 self.fields["message_objects"].queryset.filter(
-                    attached_to_content=self.instance
+                    attached_to_content=self.instance.associated
                 )
             keyhashes = request.POST.getlist("keyhash")
             if self.data.get("view_all", "") != "true" and keyhashes:
@@ -226,7 +226,7 @@ class MessageForm(forms.ModelForm):
         model = MessageContent
         fields = ["encrypted_content", "key_list"]
 
-    def __init__(self, request, own_url, **kwargs):
+    def __init__(self, request, **kwargs):
         super().__init__(**kwargs)
         if self.instance.id:
             self.initial["fetch_url"] = \

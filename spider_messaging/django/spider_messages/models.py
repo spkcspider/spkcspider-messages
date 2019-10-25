@@ -469,8 +469,9 @@ class MessageContent(BaseContent):
         return MessageForm
 
     def get_form_kwargs(self, request, **kwargs):
-        kwargs["request"] = request
-        return super().get_form_kwargs(request=request, **kwargs)
+        ret = super().get_form_kwargs(request=request, **kwargs)
+        ret["request"] = request
+        return ret
 
     def access_raw_update(self, **kwargs):
         pass
