@@ -68,7 +68,11 @@ peek_parser.add_argument(
 peek_parser.add_argument(
     'message_id', help='View message with id', nargs="?"
 )
-subparsers.add_parser("check")
+check_parser = subparsers.add_parser("check")
+check_parser.add_argument(
+    '--fix', help="Fix problems",
+    action="store_true"
+)
 send_parser = subparsers.add_parser("send")
 send_parser.add_argument(
     '--file', help='Use file instead stdin', type=argparse.FileType('rb'),
@@ -176,7 +180,7 @@ def analyse_dest(graph):
     return postbox_uriref, webref_url, domain_keys, hash_algo
 
 
-def action_send(argv, pkey, pkey_hash, session, response, src_keys):
+def action_send(argv, priv_key, pub_key_hash, session, response, src_keys):
     g_src = Graph()
     g_src.parse(data=response.content, format="turtle")
     component_uriref, src_options = analyze_src(g_src)
@@ -236,7 +240,7 @@ def action_send(argv, pkey, pkey_hash, session, response, src_keys):
             src_key_list[k[0].hex()] = \
                 base64.urlsafe_b64encode(enc).decode("ascii")
     else:
-        enc = pkey.public_key().encrypt(
+        enc = priv_key.public_key().encrypt(
             aes_key,
             padding.OAEP(
                 mgf=padding.MGF1(algorithm=argv.src_hash_algo),
@@ -244,7 +248,7 @@ def action_send(argv, pkey, pkey_hash, session, response, src_keys):
             )
         )
         # encrypt decryption key
-        src_key_list[pkey_hash] = \
+        src_key_list[pub_key_hash] = \
             base64.urlsafe_b64encode(enc).decode("ascii")
 
     for k in dest_keys:
@@ -283,7 +287,7 @@ def action_send(argv, pkey, pkey_hash, session, response, src_keys):
     # create message object
     response = session.post(
         message_create_url, data={
-            "own_hash": pkey_hash,
+            "own_hash": pub_key_hash,
             "key_list": json.dumps(src_key_list),
             "utokens": utokens
         }, headers={
@@ -331,7 +335,7 @@ def action_send(argv, pkey, pkey_hash, session, response, src_keys):
     response_dest.raise_for_status()
 
 
-def action_view(argv, pkey, pkey_hash, session, response):
+def action_view(argv, priv_key, pub_key_hash, session, response):
     g_message = Graph()
     g_message.parse(data=response.content, format="turtle")
     if argv.message_id is not None:
@@ -355,7 +359,7 @@ def action_view(argv, pkey, pkey_hash, session, response):
                 getref_url, headers={
                     "X-TOKEN": argv.token
                 }, data={
-                    "keyhash": pkey_hash
+                    "keyhash": pub_key_hash
                 }
             )
         if not response.ok:
@@ -365,10 +369,10 @@ def action_view(argv, pkey, pkey_hash, session, response):
         #     hashes, response.headers["X-KEYHASH-ALGO"].upper()
         # )()
         key_list = json.loads(response.headers["X-KEYLIST"])
-        key = key_list.get(pkey_hash, None)
+        key = key_list.get(pub_key_hash, None)
         if not key:
             parser.exit(0, "message not for me\n")
-        decrypted_key = pkey.decrypt(
+        decrypted_key = priv_key.decrypt(
             base64.urlsafe_b64decode(key),
             padding.OAEP(
                 mgf=padding.MGF1(algorithm=argv.src_hash_algo),
@@ -415,20 +419,22 @@ def action_view(argv, pkey, pkey_hash, session, response):
             print(i["id"], i["sender"])
 
 
-def action_check(argv, pkey, pkey_hash, session, response, verb=True):
+def action_check(argv, priv_key, pub_key_hash, session, response):
     src = {}
 
     g = Graph()
     g.parse(data=response.content, format="turtle")
+    postbox = None
 
     for i in g.query(
         """
             SELECT
-            ?postbox_value ?postbox_value ?key_name ?key_value
+            ?postbox ?key_base_prop ?key_name ?key_value
             WHERE {
-                ?base spkc:name ?postbox_name .
-                ?base spkc:value ?postbox_value .
-                ?postbox_value spkc:properties ?key_base_prop .
+                ?postbox spkc:properties ?postbox_prop .
+                ?postbox_prop spkc:name ?postbox_prop_name .
+                ?postbox_prop spkc:value ?key_base .
+                ?key_base spkc:properties ?key_base_prop .
                 ?key_base_prop spkc:name ?key_name .
                 ?key_base_prop spkc:value ?key_value .
             }
@@ -440,8 +446,9 @@ def action_check(argv, pkey, pkey_hash, session, response, verb=True):
             )
         }
     ):
-        src.setdefault(str(i.postbox_value), {})
-        src[str(i.postbox_value)][str(i.key_name)] = i.key_value
+        postbox = i.postbox
+        src.setdefault(str(i.key_base), {})
+        src[str(i.key_base)][str(i.key_name)] = i.key_value
 
     src_hash = getattr(
         hashes, next(iter(src.values()))["hash_algorithm"].upper()
@@ -471,6 +478,48 @@ def action_check(argv, pkey, pkey_hash, session, response, verb=True):
     if base64.urlsafe_b64decode(tmp[0][0].value) != src_activator_value:
         return "activator doesn't match shown activator"
     if errored:
+        if argv.fix:
+            pub_key_hash_bin = bytes.fromhex(pub_key_hash)
+            can_fix = list(filter(lambda x: x[0] == pub_key_hash_bin, errored))
+            csrftoken = list(g.objects(predicate=spkcgraph["csrftoken"]))[0]
+            if not can_fix or not postbox:
+                return ", ".join(map(lambda x: x[0].hex(), errored))
+
+            postbox_update = replace_action(
+                postbox, "update/"
+            )
+            finished_signatures = []
+            for key in can_fix:
+                signature = key[1].sign(
+                    base64.urlsafe_b64decode(src_activator_value),
+                    padding.PSS(
+                        mgf=padding.MGF1(argv.hash),
+                        salt_length=padding.PSS.MAX_LENGTH
+                    ),
+                    argv.hash
+                )
+                finished_signatures.append(
+                    {
+                        "hash": key[0].hex(),
+                        "signature": "{}={}".format(
+                            src_hash,
+                            base64.urlsafe_b64encode(signature).decode("ascii")
+                        )
+                    }
+                )
+            # update
+            response = session.post(
+                postbox_update, data={
+                    "signatures": finished_signatures
+                }, headers={
+                    "X-CSRFToken": csrftoken,
+                    "X-TOKEN": argv.token
+                }
+            )
+            if not response.ok:
+                raise
+            if len(can_fix) == len(errored):
+                return True
         return ", ".join(map(lambda x: x[0].hex(), errored))
     return True
 
@@ -500,11 +549,6 @@ def main(argv):
         access not in {"view", "list"}
     ):
         parser.exit(1, "url doesn't match action\n")
-    if (
-        argv.action == "fix" and
-        access != "update"
-    ):
-        parser.exit(1, "url doesn't match action\n")
     if argv.action == "send":
         match2 = static_token_matcher.match(argv.dest)
         if not match2:
@@ -519,11 +563,11 @@ def main(argv):
     argv.access_type = access
 
     with open(argv.key, "rb") as f:
-        pkey = load_priv_key(f.read())[0]
+        priv_key = load_priv_key(f.read())[0]
 
-        if not pkey:
+        if not priv_key:
             parser.exit(1, "invalid key: %s\n" % argv.key)
-        pem_public = pkey.public_key().public_bytes(
+        pem_public = priv_key.public_key().public_bytes(
             encoding=serialization.Encoding.PEM,
             format=serialization.PublicFormat.SubjectPublicKeyInfo
         )
@@ -584,9 +628,9 @@ def main(argv):
 
         digest = hashes.Hash(argv.src_hash_algo, backend=default_backend())
         digest.update(pem_public)
-        pkey_hash = digest.finalize().hex()
+        pub_key_hash = digest.finalize().hex()
         argv.attestation.add(
-            own_url.split("?", 1)[0], [pkey_hash], argv.src_hash_algo
+            own_url.split("?", 1)[0], [pub_key_hash], argv.src_hash_algo
         )
         src_keys = None
         if argv.action != "check":
@@ -612,12 +656,12 @@ def main(argv):
 
         if argv.action == "send":
             return action_send(
-                argv, pkey, pkey_hash, s, response, src_keys
+                argv, priv_key, pub_key_hash, s, response, src_keys
             )
         elif argv.action in {"view", "peek"}:
-            return action_view(argv, pkey, pkey_hash, s, response)
+            return action_view(argv, priv_key, pub_key_hash, s, response)
         elif argv.action == "check":
-            ret = action_check(argv, pkey, pkey_hash, s, response)
+            ret = action_check(argv, priv_key, pub_key_hash, s, response)
             if ret is not True:
                 parser.exit(2, "check failed: %s\n" % ret)
             print("check successful")

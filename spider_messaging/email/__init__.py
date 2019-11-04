@@ -77,7 +77,7 @@ def main(argv):
             f.write(cert.public_bytes(serialization.Encoding.PEM))
     if not all(map(os.path.exists, argv.keys)):
         argv.exit(1, "invalid keys")
-    keylist = {}
+    key_list = {}
     pw = None
     for num, key_path in enumerate(argv.keys):
         pkey = None
@@ -95,7 +95,7 @@ def main(argv):
             )
             digest = hashes.Hash(argv.hash, backend=default_backend())
             digest.update(pem_public)
-            keylist[digest.finalize().hex()] = pkey
+            key_list[digest.finalize().hex()] = pkey
         del pkey
     ctx = None
     if os.path.exists(argv.cert):

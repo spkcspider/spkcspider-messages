@@ -190,7 +190,7 @@ class PostBoxForm(forms.ModelForm):
         ret = self.cleaned_data["signatures"]
         if len(ret) == 0:
             raise forms.ValidationError(
-                _("Requires keys")
+                _("Requires signatures")
             )
         try:
             for i in ret:

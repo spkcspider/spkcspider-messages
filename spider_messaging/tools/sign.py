@@ -2,17 +2,14 @@
 
 import argparse
 import base64
-import getpass
 import logging
 import os
 import sys
 
-from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import padding
-from cryptography.hazmat.primitives.serialization import (
-    load_der_private_key, load_pem_private_key
-)
+
+from spider_messaging.keys import load_priv_key
 
 logger = logging.getLogger(__name__)
 
@@ -33,38 +30,6 @@ parser.add_argument(
 parser.add_argument(
     'sign', help='Message to sign', nargs="+"
 )
-
-
-def load_priv_key(data):
-    key = None
-    backend = None
-    pw = None
-    defbackend = default_backend()
-    try:
-        key = load_pem_private_key(data, None)
-    except ValueError:
-        pass
-    except TypeError:
-        key = load_pem_private_key(data, None, defbackend)
-    if not backend:
-        try:
-            key = load_der_private_key(data, None, defbackend)
-        except ValueError:
-            pass
-        except TypeError:
-            backend = load_der_private_key
-    if backend:
-        while not key:
-            try:
-                key = load_der_private_key(
-                    data,
-                    getpass("Enter passphrase:"),
-                    defbackend
-                )
-            except TypeError:
-                pass
-
-    return key, pw
 
 
 def main(argv):
