@@ -7,14 +7,14 @@ readme = "README.md"
 repository = "https://github.com/spkcspider/spkcspider-messaging"
 
 [tool.poetry.dependencies]
-python = ">=3.5"
+python = ">=3.6"
 rdflib = '*'
 html5lib = '*'
 cryptography = "*"
 
 
 [tool.poetry.dev-dependencies]
-spkcspider = ">=0.20.1"
+spkcspider = ">=0.21"
 spkcspider-domainauth = ">=0.4"
 django-extensions = "*"
 twisted = "*"
@@ -23,8 +23,8 @@ service_identity = "*"
 
 
 [tool.poetry.extras]
-django = ["spkcspider>=0.18"]
-test = ["spkcspider[test]>=0.18", "spkcspider-domainauth>=0.4"]
+django = ["spkcspider>=0.21"]
+test = ["spkcspider[test]>=0.21", "spkcspider-domainauth>=0.4"]
 email = ["twisted", "service_identity", "pyOpenSSL"]
 
 [tool.tox]
