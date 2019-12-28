@@ -263,8 +263,16 @@ def action_send(argv, priv_key, pub_key_hash, session, response, src_keys):
         dest_key_list[k[0].hex()] = \
             base64.urlsafe_b64encode(enc).decode("ascii")
     ctx = AESGCM(aes_key)
+    headers = b"SPKC-Type: message\n"
+    if not argv.stealth:
+        headers = b"%bSPKC-key: %b\nFrom: spkcspider@%b" % (
+            headers,
+            pub_key_hash,
+            argv.url.split("?")[0]
+        )
     blob = ctx.encrypt(
-        nonce, b"Type: message\n\n%b" % (
+        nonce, b"%b\n%b" % (
+            headers,
             blob
         ), None
     )
@@ -384,6 +392,7 @@ def action_view(argv, priv_key, pub_key_hash, session, response):
         nonce, content = response.content.split(b"\0", 1)
         blob = ctx.decrypt(nonce, content, None)
         headers, content = blob.split(b"\n\n", 1)
+        headers = headers.
         argv.file.write(content)
     else:
         queried = {}
