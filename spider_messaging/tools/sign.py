@@ -14,7 +14,7 @@ from spider_messaging.keys import load_priv_key
 logger = logging.getLogger(__name__)
 
 parser = argparse.ArgumentParser(
-    description='Store or load message manually'
+    description='Sign keys'
 )
 parser.add_argument(
     '--hash', action='store', help="Hash algorithm", default="SHA512"

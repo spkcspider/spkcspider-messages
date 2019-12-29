@@ -23,12 +23,25 @@ class AttestationResult(enum.IntEnum):
 
 
 class ReferenceType(str, enum.Enum):
-    # cause a redirect
+    # unencrypted redirect
     redirect = "a"
     # message object
     message = "b"
     # rdf file with proposed content(s)
     content = "c"
+
+    def __str__(self):
+        # output value instead of member name
+        return self.value
+
+
+class MessageType(str, enum.Enum):
+    # encrypted redirect
+    redirect = "redirect"
+    # message object
+    message = "message"
+    # file object
+    file = "file"
 
     def __str__(self):
         # output value instead of member name
