@@ -11,52 +11,81 @@ from django.db.models import Q
 from django.urls import reverse
 from django.utils.translation import gettext as _
 from spkcspider.apps.spider.fields import ContentMultipleChoiceField, JsonField
-from spkcspider.apps.spider.models import AssignedContent
+from spkcspider.apps.spider.forms.base import DataContentForm
+from spkcspider.apps.spider.models import (
+    AssignedContent, AttachedFile, SmartTag, AuthToken
+)
 from spkcspider.apps.spider.queryfilters import info_or
 from spkcspider.utils.security import get_hashob
 
-from spider_messaging.constants import ReferenceType
-
-from .models import MessageContent, PostBox, WebReference
 from .widgets import EntityListWidget, SignatureWidget
 
 
-class ReferenceForm(forms.ModelForm):
-    class Meta:
-        model = WebReference
-        fields = ["url", "key_list", "rtype"]
+class ReferenceForm(DataContentForm):
+    url = forms.URLField(max_length=600)
+    key_list = JsonField(initial=dict)
+
     create = False
 
     def __init__(self, create=False, **kwargs):
         self.create = create
         super().__init__(**kwargs)
 
-    def clean_key_list(self):
-        ret = self.cleaned_data["key_list"]
-        if isinstance(ret, str):
-            ret = json.loads(ret)
-        q = Q(pk=self.instance.postbox.pk)
-        for i in ret.keys():
-            q &= Q(
-                keys__associated_rel__info__contains="\x1epubkeyhash=%s" %
+    def clean(self):
+        ret = super().clean()
+        if isinstance(self.cleaned_data["key_list"], str):
+            self.cleaned_data["key_list"] = json.loads(
+                self.cleaned_data["key_list"]
+            )
+        q = Q()
+        for i in self.cleaned_data["key_list"].keys():
+            q |= Q(
+                target__info__contains="\x1epubkeyhash=%s" %
                 i
             )
+        self.cleaned_data["signatures"] = \
+            self.instance.associated.attached_to_content.smarttags.filter(
+                name="keys"
+            ).filter(q)
 
-        if PostBox.objects.filter(q):
-            raise forms.ValidationError(
+        if (
+            self.cleaned_data["signatures"].count() !=
+            len(self.cleaned_data["key_list"])
+        ):
+            self.add_error("key_list", forms.ValidationError(
                 _("invalid keys"),
                 code="invalid_keys"
-            )
+            ))
         return ret
 
-    def _save_m2m(self):
-        super()._save_m2m()
-        if self.create and self.instance.rtype != ReferenceType.content:
-            for h in self.instance.key_list.keys():
-                self.instance.copies.create(keyhash=h)
+    def get_prepared_attachements(self):
+        ret = {}
+        if self.create:
+            ret["smarttags"] = [
+                SmartTag(
+                    content=self.instance.associated,
+                    unique=True,
+                    name="unread",
+                    target=h
+                )
+                for h in self.cleaned_data["signatures"]
+            ]
+        return ret
 
 
-class PostBoxForm(forms.ModelForm):
+class PostBoxForm(DataContentForm):
+    only_persistent = forms.BooleanField(required=False)
+    setattr(only_persistent, "hashable", False)
+    shared = forms.BooleanField(required=False)
+    setattr(shared, "hashable", False)
+    keys = ContentMultipleChoiceField(
+        queryset=AssignedContent.objects.filter(
+            ctype__name="PublicKey"
+        ).filter(
+            info__contains="\x1epubkeyhash="
+        ), to_field_name="id",
+    )
+    setattr(keys, "hashable", True)
     webreferences = JsonField(
         widget=EntityListWidget(), disabled=True, required=False
     )
@@ -108,25 +137,24 @@ class PostBoxForm(forms.ModelForm):
 
     extract_pupkeyhash = re.compile("\x1epubkeyhash=([^\x1e=]+)=([^\x1e=]+)")
 
-    class Meta:
-        model = PostBox
-        fields = ["only_persistent", "shared", "keys"]
-
-    field_order = [
-        "only_persistent", "shared", "keys", "attestation",
-        "webreferences", "signatures"
-    ]
+    free_fields = {"only_persistent": False, "shared": True}
 
     def __init__(self, scope, request, **kwargs):
         super().__init__(**kwargs)
         self.initial["hash_algorithm"] = settings.SPIDER_HASH_ALGORITHM.name
+        self.fields["keys"].queryset = \
+            self.fields["keys"].queryset.filter(
+                usercomponent=self.instance.associated.usercomponent
+            )
         if scope in {"view", "raw", "list"} and request.is_owner:
             self.initial["webreferences"] = [
                 {
-                    "id": i.id,
-                    "size": i.cached_size,
-                    "sender": "%s?..." % i.url.split("?", 1)[0]
-                } for i in self.instance.references.all()
+                    "id": i.associated.id,
+                    "size": None,
+                    "sender": "%s?..." % i.quota_data["url"].split("?", 1)[0]
+                } for i in self.instance.associated.attached_contents.filter(
+                    ctype_name="WebReference"
+                )
             ]
             self.fields["message_objects"].queryset = \
                 self.fields["message_objects"].queryset.filter(
@@ -139,31 +167,21 @@ class PostBoxForm(forms.ModelForm):
                         info_or(hash=keyhashes)
                     )
         elif scope == "export":
-            self.initial["webreferences"] = [
-                {
-                    "key_list": i.key_list,
-                    "rtype": i.rtype,
-                    "url": i.url
-                } for i in self.instance.references.all()
-            ]
             del self.fields["message_objects"]
         else:
             del self.fields["webreferences"]
             del self.fields["message_objects"]
 
-        if scope in {"add", "update", "export"}:
-            # list valid connected key objects (pubkeyhash=)
-            self.fields["keys"].queryset = \
-                self.fields["keys"].queryset.filter(
-                    associated_rel__info__contains="\x1epubkeyhash="
-                )
-        else:
+        if scope not in {"add", "update", "export"}:
             del self.fields["keys"]
-        if self.instance.id and self.instance.keys.exists():
+        if self.instance.id:
+            signatures = self.instance.associated.smarttags.filter(
+                name="key"
+            )
             mapped_hashes = map(
                 lambda x: self.extract_pupkeyhash.search(x).group(2),
-                self.instance.keys.values_list(
-                    "associated_rel__info", flat=True
+                signatures.values_list(
+                    "target__info", flat=True
                 )
             )
             mapped_hashes = sorted(mapped_hashes)
@@ -175,16 +193,16 @@ class PostBoxForm(forms.ModelForm):
                 base64.urlsafe_b64encode(hasher).decode("ascii")
             self.initial["signatures"] = [
                 {
-                    "key": x.key,
-                    "hash": x.key.associated.getlist("hash", 1)[0].split(
+                    "key": x.target,
+                    "hash": x.target.getlist("pubkeyhash", 1)[0].split(
                         "=", 1
                     )[-1],
-                    "signature": x.signature
-                } for x in self.instance.key_infos.all()
+                    "signature": x.data["signature"]
+                } for x in signatures.all()
             ]
-        else:
-            del self.fields["attestation"]
-            del self.fields["signatures"]
+            return
+        del self.fields["attestation"]
+        del self.fields["signatures"]
 
     def clean_signatures(self):
         ret = self.cleaned_data["signatures"]
@@ -201,33 +219,55 @@ class PostBoxForm(forms.ModelForm):
             )
         return ret
 
-    def _save_m2m(self):
-        super()._save_m2m()
+    def get_prepared_attachements(self):
+        key_dict = {}
+        for pubkey in self.cleaned_data.get("keys", []):
+            smarttag = SmartTag(
+                content=self.instance.associated,
+                unique=True,
+                name="key",
+                target=pubkey,
+                data={
+                    "signature": None,
+                    "hash": pubkey.getlist("hash", 1)[0].split(
+                        "=", 1
+                    )[0]
+                }
+            )
+            key_dict[smarttag.data["hash"]] = smarttag
+
+        if self.instance.id:
+            for smartkey in self.instance.associated.smarttags.filter(
+                name="key", target__in=key_dict.keys()
+            ):
+                key_dict[smartkey.data["hash"]] = smartkey
         for sig in self.cleaned_data.get("signatures", []):
             signature = sig.get("signature")
             if signature:
-                self.instance.key_infos.filter(
-                    key__associated_rel__info__contains="\x1ehash=%s=%s" %
-                    (settings.SPIDER_HASH_ALGORITHM.name, sig["hash"])
-                ).update(signature=signature)
+                i = key_dict.get(sig["hash"])
+                if i:
+                    i.data["signature"] = signature
+
+        return {
+            "smarttags": key_dict.values()
+        }
 
 
-class MessageForm(forms.ModelForm):
+class MessageForm(DataContentForm):
     own_hash = forms.CharField(required=False, initial="")
     fetch_url = forms.CharField(disabled=True, required=False, initial="")
     was_retrieved = forms.BooleanField(
         disabled=True, required=False, initial=False
     )
+    key_list = JsonField(initial=dict)
     # by own client(s)
-    received = forms.BooleanField(disabled=True, required=False, initial=0)
-    first_run = False
+    received = forms.BooleanField(disabled=True, required=False, initial=False)
 
-    class Meta:
-        model = MessageContent
-        fields = ["encrypted_content", "key_list"]
+    first_run = False
 
     def __init__(self, request, **kwargs):
         super().__init__(**kwargs)
+
         if self.instance.id:
             self.initial["fetch_url"] = \
                 "{}://{}{}?urlpart={}/view".format(
@@ -250,17 +290,23 @@ class MessageForm(forms.ModelForm):
                 "spider_messages/partials/fields/view_encrypted_content.html"
             )
             self.initial["was_retrieved"] = \
-                self.instance.receivers.filter(
-                    received=True
+                self.instance.associated.filter(
+                    smarttags__name="received", target=None
                 ).exists()
             self.fields["key_list"].disabled = True
             self.fields["key_list"].required = False
-            # TODO: maybe use data
-            keyhashes = request.POST.getlist("keyhash")
+            keyhashes = self.data.getlist("keyhash")
+            keyhashes_q = Q()
+            for i in keyhashes:
+                keyhashes_q |= Q(
+                    target__info__contains="\x1epubkeyhash=%s" %
+                    i
+                )
             if keyhashes:
-                self.initial["received"] = self.instance.copies.filter(
-                    keyhash__in=keyhashes, received=True
-                ).count() == len(keyhashes)
+                self.initial["received"] = \
+                    self.instance.asspciated.smarttags.filter(
+                        name="received"
+                    ).filter(keyhashes_q).count() == len(keyhashes)
             self.first_run = False
         else:
             del self.fields["fetch_url"]
@@ -269,15 +315,48 @@ class MessageForm(forms.ModelForm):
             self.initial["was_retrieved"] = False
             self.first_run = True
 
-    def _save_m2m(self):
-        super()._save_m2m()
+    def get_prepared_attachements(self):
+        ret = {}
         changed_data = self.changed_data
         # create or update keys
         if (
             "key_list" in changed_data or "encrypted_content" in changed_data
         ):
             self.initial["received"] = False
-            for h in self.instance.key_list.keys():
+            if self.first_run:
+                keyhashes_q = Q()
+                for i in changed_data["key_list"].keys():
+                    keyhashes_q |= Q(
+                        info__contains="\x1epubkeyhash=%s" %
+                        i
+                    )
+                ret["smarttags"] = [
+                    SmartTag(
+                        content=self.instance.associated,
+                        unique=True,
+                        name="unread",
+                        target=t,
+                        data={"hash": t.getlist("hash", 1)[0].split(
+                            "=", 1
+                        )[0]}
+                    ) for t in self.instance.associated.usercomponent.contents.filter(  # noqa: E501
+                        ctype__name="PublicKey"
+                    ).filter(keyhashes_q)
+                ]
+
+                ret["smarttags"].append(
+                    SmartTag(
+                        content=self.instance.associated,
+                        unique=True,
+                        name="unread",
+                        target=None
+                    )
+                )
+            else:
+                ret["smarttags"] = self.instance.associated.smarttags.all()
+
+            for smartkey in ret["smarttags"]:
+                h = smartkey.target.getlist("hash", 1)[0].split("=", 1)[-1]
                 if h == self.cleaned_data["own_hash"]:
                     self.initial["received"] = True
                 self.instance.copies.update_or_create(
@@ -287,10 +366,27 @@ class MessageForm(forms.ModelForm):
                 )
         # don't allow new tokens after the first run
         if self.first_run:
-            for utoken in self.data.getlist("utokens"):
-                self.instance.receivers.update_or_create(
-                    utoken=utoken
+            ret["attachedtokens"] = [
+                AuthToken(
+                    persist=0,
+                    usercomponent=self.instance.usercomponent,
+                    attached_to_content=self.instance.associated
+                ) for utoken in self.data.getlist("utokens")
+            ]
+        if "encrypted_content" in self.changed_data:
+            f = None
+            if self.instance.pk:
+                f = self.instance.associated.attachedfiles.filter(
+                    name="encrypted_content"
+                ).first()
+            if not f:
+                f = AttachedFile(
+                    unique=True, name="encrypted_content",
+                    content=self.instance.associated
                 )
+            f.file = self.cleaned_data["encrypted_content"]
+            ret["attachedfiles"] = [f]
+        return ret
 
     def clean(self):
         super().clean()

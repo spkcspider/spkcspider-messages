@@ -1,11 +1,17 @@
 __all__ = ["SpiderMessagesConfig"]
 
 from django.apps import AppConfig
-from django.db.models.signals import m2m_changed, post_delete
+
+from django.db.models.signals import (
+    post_delete
+)
+
+from spkcspider.apps.spider.signals import update_dynamic
+
 
 from .signals import (
-    DeleteFileCb, SuccessMessageContentsCb, SuccessReferenceCb, UpdateKeysCb,
-    successful_transmitted
+    SuccessMessageContentCb, SuccessReferenceCb, successful_transmitted,
+    UpdateKeysCb, TriggerDynamicCb
 )
 
 
@@ -16,19 +22,16 @@ class SpiderMessagesConfig(AppConfig):
     spider_url_path = 'spidermessages/'
 
     def ready(self):
-        from .models import PostBox, WebReference, MessageContent
+        from spkcspider.apps.spider.models import AssignedContent
 
-        post_delete.connect(
-            DeleteFileCb, sender=WebReference
+        update_dynamic.connect(
+            TriggerDynamicCb
         )
         post_delete.connect(
-            DeleteFileCb, sender=MessageContent
-        )
-        m2m_changed.connect(
-            UpdateKeysCb, sender=PostBox.keys.through
+            UpdateKeysCb, sender=AssignedContent
         )
         successful_transmitted.connect(
-            SuccessMessageContentsCb,
+            SuccessMessageContentCb,
         )
         successful_transmitted.connect(
             SuccessReferenceCb,

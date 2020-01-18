@@ -1,85 +1,36 @@
 __all__ = [
-    "PostBox", "WebReference", "WebReferenceCopy", "MessageContent",
-    "MessageCopy", "MessageReceiver"
+    "PostBox", "WebReference", "MessageContent"
 ]
 import json
 import logging
-import posixpath
 
 import requests
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.files import File
-from django.core.files.storage import default_storage
 from django.core.files.temp import NamedTemporaryFile
-from django.db import models
+from django.db import models, transaction
 from django.http import HttpResponse, HttpResponsePermanentRedirect
 from django.test import Client
-from django.utils.translation import gettext_lazy as _
 from django.utils.translation import pgettext
 from django.views.decorators.csrf import csrf_exempt
-from jsonfield import JSONField
 from rdflib import XSD, BNode, Literal
-from spkcspider.apps.spider.conf import TOKEN_SIZE, get_requests_params
-from spkcspider.apps.spider.contents import BaseContent, add_content
+from spkcspider.apps.spider import registry
+from spkcspider.apps.spider.conf import get_requests_params
+from spkcspider.apps.spider.models import (
+    AssignedContent, AttachedFile, DataContent
+)
 from spkcspider.constants import VariantType, spkcgraph
-from spkcspider.utils.fields import add_property, literalize
-from spkcspider.utils.security import create_b64_token
+from spkcspider.utils.fields import add_by_field, add_property, literalize
 from spkcspider.utils.urls import merge_get_url
-
-from spider_messaging.constants import ReferenceType
 
 from .http import CbFileResponse
 
 logger = logging.getLogger(__name__)
 
 
-def get_cached_content_path(instance, filename):
-    ret = getattr(settings, "SPIDER_MESSAGES_DIR", "spider_messages")
-    # try 100 times to find free filename
-    # but should not take more than 1 try
-    # IMPORTANT: strip . to prevent creation of htaccess files or similar
-    for _i in range(0, 100):
-        ret_path = default_storage.generate_filename(
-            posixpath.join(
-                ret, "cached",
-                str(instance.postbox.associated.usercomponent.user.pk),
-                "{}.encrypted".format(
-                    create_b64_token(TOKEN_SIZE)
-                )
-            )
-        )
-        if not default_storage.exists(ret_path):
-            break
-    else:
-        raise FileExistsError("Unlikely event: no free filename")
-    return ret_path
-
-
-def get_send_content_path(instance, filename):
-    ret = getattr(settings, "SPIDER_MESSAGES_DIR", "spider_messages")
-    # try 100 times to find free filename
-    # but should not take more than 1 try
-    # IMPORTANT: strip . to prevent creation of htaccess files or similar
-    for _i in range(0, 100):
-        ret_path = default_storage.generate_filename(
-            posixpath.join(
-                ret, "sending",
-                str(instance.associated.usercomponent.user.pk),
-                "{}.encrypted".format(
-                    create_b64_token(TOKEN_SIZE)
-                )
-            )
-        )
-        if not default_storage.exists(ret_path):
-            break
-    else:
-        raise FileExistsError("Unlikely event: no free filename")
-    return ret_path
-
-
-@add_content
-class PostBox(BaseContent):
+@add_by_field(registry.contents, "_meta.model_name")
+class PostBox(DataContent):
     expose_name = False
     expose_description = True
     appearances = [
@@ -92,20 +43,9 @@ class PostBox(BaseContent):
             "strength": 0
         },
     ]
-    only_persistent = models.BooleanField(
-        default=False, blank=True, help_text=_(
-            "Only allow senders with a persistent token"
-        )
-    )
-    shared = models.BooleanField(
-        default=True, blank=True, help_text=_(
-            "Encrypt send messages for other clients, allow updates"
-        )
-    )
-    keys = models.ManyToManyField(
-        "spider_keys.PublicKey", related_name="+",
-        through="spider_messages.PostBoxKey"
-    )
+
+    class Meta:
+        proxy = True
 
     # @classmethod
     # def feature_urls(cls, name):
@@ -160,9 +100,6 @@ class PostBox(BaseContent):
     def get_strength_link(self):
         return 11
 
-    def get_references(self):
-        return self.keys.values_list("associated_rel", flat=True)
-
     def get_form_kwargs(self, **kwargs):
         ret = super().get_form_kwargs(**kwargs)
         ret["scope"] = kwargs["scope"]
@@ -190,8 +127,14 @@ class PostBox(BaseContent):
             if "raw" in kwargs["request"].GET:
                 return self.access_raw(**kwargs)
             return self.access_view(**kwargs)
+
         form = ReferenceForm(
-            instance=WebReference(postbox=self),
+            instance=WebReference.static_create(
+                associated_kwargs={
+                    "usercomponent": self.usercomponent,
+                    "attached_to_content": self
+                }
+            ),
             create=True,
             data=kwargs["request"].POST,
             files=kwargs["request"].FILES,
@@ -204,20 +147,20 @@ class PostBox(BaseContent):
 
     @csrf_exempt
     def access_get_webref(self, **kwargs):
-        ref = self.references.filter(
+        ref = self.associated.attached_contents.filter(
             id=kwargs["request"].GET.get("reference")
         ).first()
         if not ref:
             return HttpResponse(status=410)
-        return ref.access(kwargs)
+        return ref.access_message(kwargs)
 
     @csrf_exempt
     def access_del_webref(self, **kwargs):
-        ret = self.references.filter(
+        ret = self.associated.attached_contents.filter(
             id__in=kwargs["request"].POST.get("reference")
         )
         # maybe use csrftoken later
-        if ret.count() == 0:
+        if not ret.exists():
             return HttpResponse(status=410)
         ret.delete()
         return HttpResponse(status=200)
@@ -226,77 +169,77 @@ class PostBox(BaseContent):
         return super().get_info(unlisted=True)
 
 
-class PostBoxKey(models.Model):
-    id = models.BigAutoField(primary_key=True)
-    # fix linter warning
-    objects = models.Manager()
-    postbox = models.ForeignKey(
-        PostBox, on_delete=models.CASCADE, related_name="key_infos",
-    )
-    key = models.ForeignKey(
-        "spider_keys.PublicKey", related_name="+", on_delete=models.CASCADE,
-        editable=False
-    )
-    signature = models.TextField()
-
-
-class WebReference(models.Model):
-    id = models.BigAutoField(primary_key=True)
-    url = models.URLField(max_length=600)
-    rtype = models.CharField(max_length=1)
-    created = models.DateTimeField(auto_now_add=True, editable=False)
+@add_by_field(registry.contents, "_meta.model_name")
+class WebReference(DataContent):
     # note: the name: webreferences is used for displaying references
     # never lay both together as django will try to set
     # references which is not possible with the webreference format
-    postbox = models.ForeignKey(
-        PostBox, related_name="references", on_delete=models.CASCADE
-    )
-    cached_content = models.FileField(
-        upload_to=get_cached_content_path, blank=True
-    )
-    cached_size = models.PositiveIntegerField(null=True, blank=True)
     # not really a list; a dict
-    key_list = JSONField(help_text=_("encrypted keys for content"))
 
-    def access(self, kwargs):
-        """
-            Use rtype for appropriate action
+    appearances = [
+        {
+            "name": "WebReference",
+            "ctype": (
+                VariantType.unlisted + VariantType.unique
+            ),
+            "strength": 0
+        },
+    ]
 
-            special "access", don't confuse with the one of BaseContent
-        """
-        assert len(self.key_list) > 0
-        if self.rtype == ReferenceType.message:
-            kwargs["rtype"] = ReferenceType.message
-            return self.access_message(kwargs)
-        elif self.rtype == ReferenceType.redirect:
-            kwargs["rtype"] = ReferenceType.redirect
-            return self.access_redirect(kwargs)
-        elif self.rtype == ReferenceType.content:
-            kwargs["rtype"] = ReferenceType.content
-            return self.access_message(kwargs)
-        return HttpResponse(status=501)
+    class Meta:
+        proxy = True
+
+    def update_used_space(self, size_diff):
+        #
+        if size_diff == 0:
+            return
+        f = "remote"
+        with transaction.atomic():
+            self.associated.usercomponent.user_info.update_with_quota(
+                size_diff, f
+            )
+            self.associated.usercomponent.user_info.save(
+                update_fields=[
+                    "used_space_local", "used_space_remote"
+                ]
+            )
 
     def access_redirect(self, kwargs):
         ret = HttpResponsePermanentRedirect(
             redirect_to=self.url
         )
-        ret["X-TYPE"] = kwargs["rtype"].name
+        # ret["X-TYPE"] = kwargs["rtype"].name
         ret["X-KEYLIST"] = json.dumps(self.key_list)
-        self.copies.filter(
-            keyhash__in=kwargs["request"].POST.getlist("keyhash")
-        ).update(received=True)
+
+        q = models.Q()
+        for i in kwargs["request"].POST.getlist("keyhash"):
+            q |= models.Q(
+                target__info__contains="\x1epubkeyhash=%s" %
+                i
+            )
+        self.associated.smarttags.filter(
+            kwargs["request"].POST.getlist("keyhash")
+        ).update(name="received")
         # remove completed
-        for i in WebReference.objects.exclude(
-            copies__received=False
-        ):
-            i.cached_content.delete(False)
-            # triggers other signals and removes content cleanly
-            i.associated.delete()
+        AssignedContent.objects.filter(
+            ctype__name="WebReference"
+        ).exclude(
+            smarttags__name="unread"
+        ).delete()
         return ret
 
     def access_message(self, kwargs):
-        if self.cached_size is None:
+        cached_content = self.associated.attachedfiles.filter(
+            name="cache"
+        ).first()
+        if not cached_content:
+            cached_content = AttachedFile(
+                content=self,
+                unique=True,
+                name="cache"
+            )
             params, inline_domain = get_requests_params(self.url)
+            fp = None
             if inline_domain:
                 try:
                     resp = Client().get(
@@ -308,37 +251,35 @@ class WebReference(models.Model):
                             )
                         ), SERVER_NAME=inline_domain
                     )
-                    if resp.status_code == 200:
-                        c_length = resp.get("content-length", None)
-                        max_length = getattr(
-                            settings, "SPIDER_MAX_FILE_SIZE", None
-                        )
-                        if (
-                            max_length and (
-                                c_length is None or
-                                c_length > max_length
-                            )
-                        ):
-                            return HttpResponse(
-                                "Too big/not specified", status=413
-                            )
-                        fp = NamedTemporaryFile(
-                            suffix='.upload', dir=settings.FILE_UPLOAD_TEMP_DIR
-                        )
-                        written_size = 0
-                        for chunk in resp:
-                            written_size += fp.write(chunk)
-                        self.postbox.update_used_space(written_size)
-                        self.cached_size = written_size
-                        # updates also cached_size
-                        self.cached_content.save("", File(fp))
-                    else:
+                    if resp.status_code != 200:
+
                         logging.info(
                             "file retrieval failed: \"%s\" failed",
                             self.url
                         )
                         return HttpResponse("other error", status=502)
+
+                    c_length = resp.get("content-length", None)
+                    max_length = getattr(
+                        settings, "SPIDER_MAX_FILE_SIZE", None
+                    )
+                    if (
+                        max_length and (
+                            c_length is None or
+                            c_length > max_length
+                        )
+                    ):
+                        return HttpResponse(
+                            "Too big/not specified", status=413
+                        )
+                    written_size = 0
+                    for chunk in resp:
+                        written_size += fp.write(chunk)
+                    self.update_used_space(written_size)
+                    # saves object
+                    cached_content.file.save("", File(fp))
                 except ValidationError as exc:
+                    del fp
                     logging.info(
                         "Quota exceeded", exc_info=exc
                     )
@@ -371,18 +312,13 @@ class WebReference(models.Model):
                             dir=settings.FILE_UPLOAD_TEMP_DIR
                         )
                         written_size = 0
-                        try:
-                            for chunk in resp.iter_content(
-                                fp.DEFAULT_CHUNK_SIZE
-                            ):
-                                written_size += fp.write(chunk)
-                        except Exception:
-                            del fp
-                            raise
-                        self.postbox.update_used_space(written_size)
-                        self.cached_size = written_size
-                        # saves also cached_size
-                        self.cached_content.save("", File(fp))
+                        for chunk in resp.iter_content(
+                            fp.DEFAULT_CHUNK_SIZE
+                        ):
+                            written_size += fp.write(chunk)
+                        self.update_used_space(written_size)
+                        # saves object
+                        cached_content.file.save("", File(fp))
 
                 except requests.exceptions.SSLError as exc:
                     logger.info(
@@ -391,11 +327,13 @@ class WebReference(models.Model):
                     )
                     return HttpResponse("ssl error", status=502)
                 except ValidationError as exc:
+                    del fp
                     logging.info(
                         "Quota exceeded", exc_info=exc
                     )
                     return HttpResponse("Quota", status=413)
                 except Exception as exc:
+                    del fp
                     logging.info(
                         "file retrieval failed: \"%s\" failed",
                         self.url, exc_info=exc
@@ -403,41 +341,27 @@ class WebReference(models.Model):
                     return HttpResponse("other error", status=502)
 
         ret = CbFileResponse(
-            self.cached_content.open("rb")
+            cached_content.file.open("rb")
         )
-        ret.refcopies = self.copies.filter(
-            keyhash__in=kwargs["request"].POST.getlist("keyhash")
+
+        q = models.Q()
+        for i in kwargs["request"].POST.getlist("keyhash"):
+            q |= models.Q(
+                target__info__contains="\x1epubkeyhash=%s" %
+                i
+            )
+        ret.refcopies = self.associated.smarttags.filter(
+            q
         )
-        ret["X-TYPE"] = kwargs["rtype"].name
+        # ret["X-TYPE"] = kwargs["rtype"].name
         ret["X-KEYLIST"] = json.dumps(self.key_list)
         return ret
 
 
-class WebReferenceCopy(models.Model):
-    id = models.BigAutoField(primary_key=True)
-    ref = models.ForeignKey(
-        WebReference, related_name="copies", on_delete=models.CASCADE
-    )
-    keyhash = models.CharField(max_length=200)
-    received = models.BooleanField(default=False, blank=True)
-
-    class Meta():
-        unique_together = [
-            ("ref", "keyhash")
-        ]
-
-
-@add_content
-class MessageContent(BaseContent):
+@add_by_field(registry.contents, "_meta.model_name")
+class MessageContent(DataContent):
     expose_name = False
     expose_description = False
-    encrypted_content = models.FileField(
-        upload_to=get_send_content_path, null=True, blank=False
-    )
-    # required for updates
-    key_list = JSONField(
-        help_text=_("Own encrypted keys"), default=dict, blank=True
-    )
 
     appearances = [
         {
@@ -450,6 +374,9 @@ class MessageContent(BaseContent):
             "strength": 0
         },
     ]
+
+    class Meta:
+        proxy = True
 
     def get_strength_link(self):
         return 11
@@ -496,32 +423,3 @@ class MessageContent(BaseContent):
         )
         ret["X-KEYLIST"] = json.dumps(self.key_list)
         return ret
-
-
-class MessageCopy(models.Model):
-    id = models.BigAutoField(primary_key=True)
-    content = models.ForeignKey(
-        MessageContent, related_name="copies", on_delete=models.CASCADE
-    )
-    # cleaned up on updates via signals, see
-    keyhash = models.CharField(max_length=200)
-    received = models.BooleanField(default=False, blank=True)
-
-    class Meta():
-        unique_together = [
-            ("content", "keyhash")
-        ]
-
-
-class MessageReceiver(models.Model):
-    id = models.BigAutoField(primary_key=True)
-    content = models.ForeignKey(
-        MessageContent, related_name="receivers", on_delete=models.CASCADE
-    )
-    received = models.BooleanField(default=False, blank=True)
-    utoken = models.CharField(max_length=100)
-
-    class Meta():
-        unique_together = [
-            ("content", "utoken")
-        ]

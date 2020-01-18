@@ -4,7 +4,7 @@ from django.http import Http404
 from django.utils.decorators import method_decorator
 from django.views import View
 from django.views.decorators.csrf import csrf_exempt
-from spkcspider.apps.spider.models import AssignedContent
+from spkcspider.apps.spider.models import AssignedContent, AuthToken
 from spkcspider.apps.spider.views import UserTestMixin
 from spkcspider.utils.settings import get_settings_func
 
@@ -16,11 +16,10 @@ _empty_set = frozenset()
 
 class MessageContentView(UserTestMixin, View):
     model = MessageContent
-    request = None
+    token = None
 
     @method_decorator(csrf_exempt)
     def dispatch(self, request, *args, **kwargs):
-        self.request = request
         try:
             obj = self.get_object()
             self.usercomponent = obj.usercomponent
@@ -34,8 +33,9 @@ class MessageContentView(UserTestMixin, View):
 
     def get_object(self):
         try:
-            return AssignedContent.objects.from_url_part(
-                self.request.GET.get("urlpart", ""), variant="MessageContent"
+
+            return AssignedContent.objects.from_token(
+                self.request.GET.get("token", ""), variant="MessageContent"
             )[0]
         except (
             AssignedContent.DoesNotExist,
@@ -44,8 +44,8 @@ class MessageContentView(UserTestMixin, View):
             raise Http404()
 
     def test_func(self):
-        self.receivers = self.object.receivers.filter(
-            utoken__in=self.request.GET.getlist("utoken")
+        self.receivers = AuthToken.objects.filter(
+            token__in=self.request.GET.getlist("token")
         )
         return self.receivers.exists()
 
@@ -57,6 +57,9 @@ class MessageContentView(UserTestMixin, View):
         # don't add key-list; it is just for own keys
         # owner should access message objects via access_view
         ret["content-length"] = self.object.encrypted_content.size
+        ret.msgcopies = self.object.associated.smarttags.filter(
+            name="unread", target=None
+        )
         ret.msgreceivers = self.receivers
         return ret
 

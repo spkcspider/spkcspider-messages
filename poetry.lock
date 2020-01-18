@@ -1,5 +1,5 @@
 [[package]]
-category = "dev"
+category = "main"
 description = "ASGI specs, helper code, and adapters"
 name = "asgiref"
 optional = false
@@ -10,7 +10,7 @@ version = "3.2.3"
 tests = ["pytest (>=4.3.0,<4.4.0)", "pytest-asyncio (>=0.10.0,<0.11.0)"]
 
 [[package]]
-category = "dev"
+category = "main"
 description = "Classes Without Boilerplate"
 name = "attrs"
 optional = false
@@ -24,7 +24,7 @@ docs = ["sphinx", "zope.interface"]
 tests = ["coverage", "hypothesis", "pympler", "pytest (>=4.3.0)", "six", "zope.interface"]
 
 [[package]]
-category = "dev"
+category = "main"
 description = "Self-service finite-state machines for the programmer on the go."
 name = "automat"
 optional = false
@@ -39,7 +39,7 @@ six = "*"
 visualize = ["graphviz (>0.5.1)", "Twisted (>=16.1.1)"]
 
 [[package]]
-category = "dev"
+category = "main"
 description = "An easy safelist-based HTML-sanitizing tool."
 name = "bleach"
 optional = false
@@ -51,7 +51,7 @@ six = ">=1.9.0"
 webencodings = "*"
 
 [[package]]
-category = "dev"
+category = "main"
 description = "Python package for providing Mozilla's CA Bundle."
 name = "certifi"
 optional = false
@@ -70,7 +70,7 @@ version = "1.13.2"
 pycparser = "*"
 
 [[package]]
-category = "dev"
+category = "main"
 description = "Universal encoding detector for Python 2 and 3"
 name = "chardet"
 optional = false
@@ -78,7 +78,7 @@ python-versions = "*"
 version = "3.0.4"
 
 [[package]]
-category = "dev"
+category = "main"
 description = "Symbolic constants in Python"
 name = "constantly"
 optional = false
@@ -105,12 +105,12 @@ pep8test = ["flake8", "flake8-import-order", "pep8-naming"]
 test = ["pytest (>=3.6.0,<3.9.0 || >3.9.0,<3.9.1 || >3.9.1,<3.9.2 || >3.9.2)", "pretend", "iso8601", "pytz", "hypothesis (>=1.11.4,<3.79.2 || >3.79.2)"]
 
 [[package]]
-category = "dev"
+category = "main"
 description = "A high-level Python Web framework that encourages rapid development and clean, pragmatic design."
 name = "django"
 optional = false
 python-versions = ">=3.6"
-version = "3.0.1"
+version = "3.0.2"
 
 [package.dependencies]
 asgiref = ">=3.2,<4.0"
@@ -127,13 +127,13 @@ description = "Extensions for Django"
 name = "django-extensions"
 optional = false
 python-versions = "*"
-version = "2.2.5"
+version = "2.2.6"
 
 [package.dependencies]
 six = ">=1.2"
 
 [[package]]
-category = "dev"
+category = "main"
 description = "Fast ratelimit implementation with django caches"
 name = "django-fast-ratelimit"
 optional = false
@@ -144,7 +144,7 @@ version = "0.5.0.2"
 django = ">=2.0"
 
 [[package]]
-category = "dev"
+category = "main"
 description = "Django utility to retrieve the next or previous object, given a current object and a queryset."
 name = "django-next-prev"
 optional = false
@@ -155,7 +155,7 @@ version = "1.0.1"
 Django = ">=1.8"
 
 [[package]]
-category = "dev"
+category = "main"
 description = "Modified Django FileResponse that adds Content-Range headers."
 name = "django-ranged-response"
 optional = false
@@ -166,7 +166,7 @@ version = "0.2.0"
 django = "*"
 
 [[package]]
-category = "dev"
+category = "main"
 description = ""
 name = "django-simple-jsonfield"
 optional = false
@@ -177,7 +177,7 @@ version = "0.3.1"
 django = "*"
 
 [[package]]
-category = "dev"
+category = "main"
 description = "Tweak the form field rendering in templates, not in python-level form definitions."
 name = "django-widget-tweaks"
 optional = false
@@ -204,7 +204,7 @@ genshi = ["genshi"]
 lxml = ["lxml"]
 
 [[package]]
-category = "dev"
+category = "main"
 description = "A featureful, immutable, and correct URL for Python."
 name = "hyperlink"
 optional = false
@@ -215,7 +215,7 @@ version = "19.0.0"
 idna = ">=2.5"
 
 [[package]]
-category = "dev"
+category = "main"
 description = "Internationalized Domain Names in Applications (IDNA)"
 name = "idna"
 optional = false
@@ -223,7 +223,7 @@ python-versions = ">=2.7, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*"
 version = "2.8"
 
 [[package]]
-category = "dev"
+category = "main"
 description = ""
 name = "incremental"
 optional = false
@@ -245,7 +245,7 @@ version = "0.6.0"
 six = "*"
 
 [[package]]
-category = "dev"
+category = "main"
 description = "ASN.1 types and codecs"
 name = "pyasn1"
 optional = false
@@ -253,12 +253,12 @@ python-versions = "*"
 version = "0.4.8"
 
 [[package]]
-category = "dev"
+category = "main"
 description = "A collection of ASN.1-based protocols modules."
 name = "pyasn1-modules"
 optional = false
 python-versions = "*"
-version = "0.2.7"
+version = "0.2.8"
 
 [package.dependencies]
 pyasn1 = ">=0.4.6,<0.5.0"
@@ -272,19 +272,15 @@ python-versions = ">=2.7, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*"
 version = "2.19"
 
 [[package]]
-category = "dev"
+category = "main"
 description = "Hamcrest framework for matcher objects"
 name = "pyhamcrest"
 optional = false
-python-versions = "*"
-version = "1.9.0"
-
-[package.dependencies]
-setuptools = "*"
-six = "*"
+python-versions = ">=3.5"
+version = "2.0.0"
 
 [[package]]
-category = "dev"
+category = "main"
 description = "Python wrapper module around the OpenSSL library"
 name = "pyopenssl"
 optional = false
@@ -308,7 +304,7 @@ python-versions = ">=2.6, !=3.0.*, !=3.1.*, !=3.2.*"
 version = "2.4.6"
 
 [[package]]
-category = "dev"
+category = "main"
 description = "World timezone definitions, modern and historical"
 name = "pytz"
 optional = false
@@ -332,7 +328,7 @@ html = ["html5lib"]
 sparql = ["sparqlwrapper"]
 
 [[package]]
-category = "dev"
+category = "main"
 description = "Python HTTP for Humans."
 name = "requests"
 optional = false
@@ -350,7 +346,7 @@ security = ["pyOpenSSL (>=0.14)", "cryptography (>=1.3.4)", "idna (>=2.0.0)"]
 socks = ["PySocks (>=1.5.6,<1.5.7 || >1.5.7)", "win-inet-pton"]
 
 [[package]]
-category = "dev"
+category = "main"
 description = "Service identity verification for pyOpenSSL & cryptography."
 name = "service-identity"
 optional = false
@@ -374,22 +370,22 @@ category = "main"
 description = "Python 2 and 3 compatibility utilities"
 name = "six"
 optional = false
-python-versions = ">=2.6, !=3.0.*, !=3.1.*"
-version = "1.13.0"
+python-versions = ">=2.7, !=3.0.*, !=3.1.*, !=3.2.*"
+version = "1.14.0"
 
 [[package]]
-category = "dev"
+category = "main"
 description = "A secure, decentral platform for maintaining your online identity"
 name = "spkcspider"
 optional = false
 python-versions = ">=3.6"
-version = "0.21"
+version = "0.26.1"
 
 [package.dependencies]
 bleach = "*"
 certifi = "*"
 cryptography = "*"
-django = ">=2.2"
+django = ">=3.0"
 django-fast-ratelimit = "*"
 django-next-prev = "*"
 django-ranged-response = "*"
@@ -399,8 +395,15 @@ html5lib = "*"
 rdflib = "*"
 requests = "*"
 
+[package.extras]
+fastcgi = ["flipflop"]
+mysql = ["mysqlclient", "django-mysql"]
+postgresql = ["psycopg2"]
+tasks = ["celery", "sqlalchemy"]
+test = ["django-simple-captcha", "celery", "sqlalchemy", "spkcspider-domainauth (>=0.4)", "django-webtest", "wsgiproxy2"]
+
 [[package]]
-category = "dev"
+category = "main"
 description = "Helper for spkcspiders domain authentication"
 name = "spkcspider-domainauth"
 optional = false
@@ -411,7 +414,7 @@ version = "0.6.2"
 django = ">=2.0"
 
 [[package]]
-category = "dev"
+category = "main"
 description = "Non-validating SQL parser"
 name = "sqlparse"
 optional = false
@@ -419,7 +422,7 @@ python-versions = ">=2.7, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*"
 version = "0.3.0"
 
 [[package]]
-category = "dev"
+category = "main"
 description = "An asynchronous networking framework written in Python"
 name = "twisted"
 optional = false
@@ -448,7 +451,7 @@ tls = ["pyopenssl (>=16.0.0)", "service_identity (>=18.1.0)", "idna (>=0.6,<2.3 
 windows_platform = ["pywin32", "pyopenssl (>=16.0.0)", "service_identity (>=18.1.0)", "idna (>=0.6,<2.3 || >2.3)", "pyasn1", "cryptography (>=2.5)", "appdirs (>=1.4.0)", "bcrypt (>=3.0.0)", "soappy", "pyserial (>=3.0)", "h2 (>=3.0,<4.0)", "priority (>=1.1.0,<2.0)", "pywin32"]
 
 [[package]]
-category = "dev"
+category = "main"
 description = "HTTP library with thread-safe connection pooling, file post, and more."
 name = "urllib3"
 optional = false
@@ -468,7 +471,7 @@ python-versions = "*"
 version = "0.5.1"
 
 [[package]]
-category = "dev"
+category = "main"
 description = "Interfaces for Python"
 name = "zope.interface"
 optional = false
@@ -484,12 +487,12 @@ test = ["zope.event"]
 testing = ["coverage", "nose", "zope.event"]
 
 [extras]
-django = []
-email = []
-test = []
+django = ["spkcspider", "spkcspider-domainauth"]
+email = ["twisted", "service_identity", "pyOpenSSL"]
+test = ["spkcspider-domainauth"]
 
 [metadata]
-content-hash = "7058d9d6886e192d29eb5222f8c4b2de5600d6657747d00f3181039dd8e6c1b3"
+content-hash = "de15da8225b3e0c23b559bf77da650df1a7dfe81293e2e3329995ea301d744a7"
 python-versions = ">=3.6"
 
 [metadata.files]
@@ -580,12 +583,12 @@ cryptography = [
     {file = "cryptography-2.8.tar.gz", hash = "sha256:3cda1f0ed8747339bbdf71b9f38ca74c7b592f24f65cdb3ab3765e4b02871651"},
 ]
 django = [
-    {file = "Django-3.0.1-py3-none-any.whl", hash = "sha256:b61295749be7e1c42467c55bcabdaee9fbe9496fdf9ed2e22cef44d9de2ff953"},
-    {file = "Django-3.0.1.tar.gz", hash = "sha256:315b11ea265dd15348d47f2cbb044ef71da2018f6e582fed875c889758e6f844"},
+    {file = "Django-3.0.2-py3-none-any.whl", hash = "sha256:4f2c913303be4f874015993420bf0bd8fd2097a9c88e6b49c6a92f9bdd3fb13a"},
+    {file = "Django-3.0.2.tar.gz", hash = "sha256:8c3575f81e11390893860d97e1e0154c47512f180ea55bd84ce8fa69ba8051ca"},
 ]
 django-extensions = [
-    {file = "django-extensions-2.2.5.tar.gz", hash = "sha256:b58320d3fe3d6ae7d1d8e38959713fa92272f4921e662d689058d942a5b444f7"},
-    {file = "django_extensions-2.2.5-py2.py3-none-any.whl", hash = "sha256:a9db7c56a556d244184f589f2437b4228de86ee45e5ebb837fb20c6d54e95ea5"},
+    {file = "django-extensions-2.2.6.tar.gz", hash = "sha256:936e8e3962024d3c75ea54f4e0248002404ca7ca7fb698430e60b06b5555b4e7"},
+    {file = "django_extensions-2.2.6-py2.py3-none-any.whl", hash = "sha256:4524eca892d23fa6e93b0620901983b287ff5dc806f1b978d6a98541f06b9471"},
 ]
 django-fast-ratelimit = [
     {file = "django-fast-ratelimit-0.5.0.2.tar.gz", hash = "sha256:f6262c2fbd1aa868893a95da669a7e1ca0d353b71e557c13411bc6946a4a2f71"},
@@ -641,29 +644,26 @@ pyasn1 = [
     {file = "pyasn1-0.4.8.tar.gz", hash = "sha256:aef77c9fb94a3ac588e87841208bdec464471d9871bd5050a287cc9a475cd0ba"},
 ]
 pyasn1-modules = [
-    {file = "pyasn1-modules-0.2.7.tar.gz", hash = "sha256:0c35a52e00b672f832e5846826f1fb7507907f7d52fba6faa9e3c4cbe874fe4b"},
-    {file = "pyasn1_modules-0.2.7-py2.4.egg", hash = "sha256:233f55c840e821e76828262db976ac894b285909d22d060c2bdb522e7bf28cc6"},
-    {file = "pyasn1_modules-0.2.7-py2.5.egg", hash = "sha256:9ca5e376a6d9dee35bb3a62608dfa2e6698798aa6b8db3c7afd0eb31af0d63c7"},
-    {file = "pyasn1_modules-0.2.7-py2.6.egg", hash = "sha256:27581362b4253b9c999882a64df974124cde12be0bf2c04148a0d68bc6bbb7b8"},
-    {file = "pyasn1_modules-0.2.7-py2.7.egg", hash = "sha256:13a6955947d8a554de78fc305a4d651f20fb5580b88612a5f0661d4f189d27ac"},
-    {file = "pyasn1_modules-0.2.7-py2.py3-none-any.whl", hash = "sha256:b6ada4f840fe51abf5a6bd545b45bf537bea62221fa0dde2e8a553ed9f06a4e3"},
-    {file = "pyasn1_modules-0.2.7-py3.1.egg", hash = "sha256:9b972f81f59d896cebb9ebb1d44296f1acb28bf7869443c37551f4eed8d74f83"},
-    {file = "pyasn1_modules-0.2.7-py3.2.egg", hash = "sha256:64f6aecf26e93f6a3ba3725b4eb9f532551747d7a63ca9ff43aef12f4bf11eac"},
-    {file = "pyasn1_modules-0.2.7-py3.3.egg", hash = "sha256:33c220a2701032261a23eea6e9881404ac6fc7ff96f183b5353fea8fc8962547"},
-    {file = "pyasn1_modules-0.2.7-py3.4.egg", hash = "sha256:24d54188cb7abd750e0a2cba61b7b46a75608175a0c3c1b1eee08322915d8d21"},
-    {file = "pyasn1_modules-0.2.7-py3.5.egg", hash = "sha256:7b4edf07ca2f759d7cf693184be09f22e067c2eb52b03c770d0a2e9de1c67dfd"},
-    {file = "pyasn1_modules-0.2.7-py3.6.egg", hash = "sha256:eaf35047a0b068e3e0c2a99618b13b65c98c329661daa78c9d44a4ef0fe8139e"},
-    {file = "pyasn1_modules-0.2.7-py3.7.egg", hash = "sha256:c14b107a67ee36a7f183ae9f4803ffde4a03b67f3192eab0a62e851af71371d3"},
+    {file = "pyasn1-modules-0.2.8.tar.gz", hash = "sha256:905f84c712230b2c592c19470d3ca8d552de726050d1d1716282a1f6146be65e"},
+    {file = "pyasn1_modules-0.2.8-py2.4.egg", hash = "sha256:0fe1b68d1e486a1ed5473f1302bd991c1611d319bba158e98b106ff86e1d7199"},
+    {file = "pyasn1_modules-0.2.8-py2.5.egg", hash = "sha256:fe0644d9ab041506b62782e92b06b8c68cca799e1a9636ec398675459e031405"},
+    {file = "pyasn1_modules-0.2.8-py2.6.egg", hash = "sha256:a99324196732f53093a84c4369c996713eb8c89d360a496b599fb1a9c47fc3eb"},
+    {file = "pyasn1_modules-0.2.8-py2.7.egg", hash = "sha256:0845a5582f6a02bb3e1bde9ecfc4bfcae6ec3210dd270522fee602365430c3f8"},
+    {file = "pyasn1_modules-0.2.8-py2.py3-none-any.whl", hash = "sha256:a50b808ffeb97cb3601dd25981f6b016cbb3d31fbf57a8b8a87428e6158d0c74"},
+    {file = "pyasn1_modules-0.2.8-py3.1.egg", hash = "sha256:f39edd8c4ecaa4556e989147ebf219227e2cd2e8a43c7e7fcb1f1c18c5fd6a3d"},
+    {file = "pyasn1_modules-0.2.8-py3.2.egg", hash = "sha256:b80486a6c77252ea3a3e9b1e360bc9cf28eaac41263d173c032581ad2f20fe45"},
+    {file = "pyasn1_modules-0.2.8-py3.3.egg", hash = "sha256:65cebbaffc913f4fe9e4808735c95ea22d7a7775646ab690518c056784bc21b4"},
+    {file = "pyasn1_modules-0.2.8-py3.4.egg", hash = "sha256:15b7c67fabc7fc240d87fb9aabf999cf82311a6d6fb2c70d00d3d0604878c811"},
+    {file = "pyasn1_modules-0.2.8-py3.5.egg", hash = "sha256:426edb7a5e8879f1ec54a1864f16b882c2837bfd06eee62f2c982315ee2473ed"},
+    {file = "pyasn1_modules-0.2.8-py3.6.egg", hash = "sha256:cbac4bc38d117f2a49aeedec4407d23e8866ea4ac27ff2cf7fb3e5b570df19e0"},
+    {file = "pyasn1_modules-0.2.8-py3.7.egg", hash = "sha256:c29a5e5cc7a3f05926aff34e097e84f8589cd790ce0ed41b67aed6857b26aafd"},
 ]
 pycparser = [
     {file = "pycparser-2.19.tar.gz", hash = "sha256:a988718abfad80b6b157acce7bf130a30876d27603738ac39f140993246b25b3"},
 ]
 pyhamcrest = [
-    {file = "PyHamcrest-1.9.0-py2.6.egg", hash = "sha256:f30e9a310bcc1808de817a92e95169ffd16b60cbc5a016a49c8d0e8ababfae79"},
-    {file = "PyHamcrest-1.9.0-py2.py3-none-any.whl", hash = "sha256:6b672c02fdf7470df9674ab82263841ce8333fb143f32f021f6cb26f0e512420"},
-    {file = "PyHamcrest-1.9.0-py3.2.egg", hash = "sha256:bac0bea7358666ce52e3c6c85139632ed89f115e9af52d44b3c36e0bf8cf16a9"},
-    {file = "PyHamcrest-1.9.0-py3.4.egg", hash = "sha256:7a4bdade0ed98c699d728191a058a60a44d2f9c213c51e2dd1e6fb42f2c6128a"},
-    {file = "PyHamcrest-1.9.0.tar.gz", hash = "sha256:8ffaa0a53da57e89de14ced7185ac746227a8894dbd5a3c718bf05ddbd1d56cd"},
+    {file = "PyHamcrest-2.0.0-py3-none-any.whl", hash = "sha256:36cda5e849e3ee9ce54628667471e5e769f596259bb3c13c3596f6059a615ef8"},
+    {file = "PyHamcrest-2.0.0.tar.gz", hash = "sha256:5959cb4ab465b303522d2e0d270a6ee581c3ad9ba419e304bb6ebe50a60ea37a"},
 ]
 pyopenssl = [
     {file = "pyOpenSSL-19.1.0-py2.py3-none-any.whl", hash = "sha256:621880965a720b8ece2f1b2f54ea2071966ab00e2970ad2ce11d596102063504"},
@@ -690,12 +690,12 @@ service-identity = [
     {file = "service_identity-18.1.0.tar.gz", hash = "sha256:0858a54aabc5b459d1aafa8a518ed2081a285087f349fe3e55197989232e2e2d"},
 ]
 six = [
-    {file = "six-1.13.0-py2.py3-none-any.whl", hash = "sha256:1f1b7d42e254082a9db6279deae68afb421ceba6158efa6131de7b3003ee93fd"},
-    {file = "six-1.13.0.tar.gz", hash = "sha256:30f610279e8b2578cab6db20741130331735c781b56053c59c4076da27f06b66"},
+    {file = "six-1.14.0-py2.py3-none-any.whl", hash = "sha256:8f3cd2e254d8f793e7f3d6d9df77b92252b52637291d0f0da013c76ea2724b6c"},
+    {file = "six-1.14.0.tar.gz", hash = "sha256:236bdbdce46e6e6a3d61a337c0f8b763ca1e8717c03b369e87a7ec7ce1319c0a"},
 ]
 spkcspider = [
-    {file = "spkcspider-0.21-py3-none-any.whl", hash = "sha256:f9badb21279520dd21a5e7bdc6873b55d65900814ae326e22b0bf2b6d06662a6"},
-    {file = "spkcspider-0.21.tar.gz", hash = "sha256:7022df59ae423f3a463282c895612a179260025d31fbcfb851a2431ba97c9550"},
+    {file = "spkcspider-0.26.1-py3-none-any.whl", hash = "sha256:8b04a97a2928bb847f0b329d0be305f0c6f833b45e84016f5db8c8b6211edd2a"},
+    {file = "spkcspider-0.26.1.tar.gz", hash = "sha256:2d4f9444ded39c9fc41bd4792351adc57fcc19f4f453353370fb79932201209c"},
 ]
 spkcspider-domainauth = [
     {file = "spkcspider-domainauth-0.6.2.tar.gz", hash = "sha256:39fa6339e087f3fd283f44beb3e1eb33774f74c88b6cee985c66ada1376ac058"},

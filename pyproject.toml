@@ -11,20 +11,26 @@ python = ">=3.6"
 rdflib = '*'
 html5lib = '*'
 cryptography = "*"
+spkcspider = {version = ">=0.24", optional=true}
+spkcspider-domainauth = {version = ">=0.4", optional=true}
+
+twisted = {version = "*", optional=true}
+service_identity = {version = "*", optional=true}
+pyOpenSSL = {version = "*", optional=true}
 
 
 [tool.poetry.dev-dependencies]
-spkcspider = ">=0.21"
-spkcspider-domainauth = ">=0.4"
 django-extensions = "*"
 twisted = "*"
 pyOpenSSL = "*"
 service_identity = "*"
+spkcspider = {version = ">=0.26"}
+spkcspider-domainauth = {version = ">=0.4"}
 
 
 [tool.poetry.extras]
-django = ["spkcspider>=0.21"]
-test = ["spkcspider[test]>=0.21", "spkcspider-domainauth>=0.4"]
+django = ["spkcspider", "spkcspider-domainauth"]
+test = ["spkcspider[test]", "spkcspider-domainauth"]
 email = ["twisted", "service_identity", "pyOpenSSL"]
 
 [tool.tox]
@@ -32,7 +38,7 @@ legacy_tox_ini = """
 [tox]
 minversion = 3.4.0
 skipsdist=true
-envlist = py{35,36,37}-django{22,master}
+envlist = py{35,36,37}-django{30,master}
 
 [testenv]
 commands = python -Wd ./manage.py test tests
@@ -42,10 +48,7 @@ setenv =
     PYTHONDONTWRITEBYTECODE=1
 
 deps =
-  spkcspider
-  django-webtest
-  WSGIProxy2
-  django22: Django>=2.2a1,<=2.2.99
+  django30: Django>=3.0,<3.1
   djangomaster: https://github.com/django/django/archive/master.zip
 
 """
