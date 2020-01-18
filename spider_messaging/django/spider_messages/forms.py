@@ -40,8 +40,8 @@ class ReferenceForm(DataContentForm):
         q = Q()
         for i in self.cleaned_data["key_list"].keys():
             q |= Q(
-                target__info__contains="\x1epubkeyhash=%s" %
-                i
+                target__info__regex="\x1ehash=[^=]+=%s" %
+                re.escape(i)
             )
         self.cleaned_data["signatures"] = \
             self.instance.associated.attached_to_content.smarttags.filter(
@@ -76,7 +76,7 @@ class ReferenceForm(DataContentForm):
 class PostBoxForm(DataContentForm):
     only_persistent = forms.BooleanField(required=False)
     setattr(only_persistent, "hashable", False)
-    shared = forms.BooleanField(required=False)
+    shared = forms.BooleanField(required=False, initial=True)
     setattr(shared, "hashable", False)
     keys = ContentMultipleChoiceField(
         queryset=AssignedContent.objects.filter(
@@ -136,6 +136,7 @@ class PostBoxForm(DataContentForm):
     )
 
     extract_pupkeyhash = re.compile("\x1epubkeyhash=([^\x1e=]+)=([^\x1e=]+)")
+    extract_hash = re.compile("\x1ehash=([^\x1e=]+)=([^\x1e=]+)")
 
     free_fields = {"only_persistent": False, "shared": True}
 
@@ -175,6 +176,10 @@ class PostBoxForm(DataContentForm):
         if scope not in {"add", "update", "export"}:
             del self.fields["keys"]
         if self.instance.id:
+            if "keys" in self.fields:
+                self.initial["keys"] = self.instance.associated.smarttags.filter(  # noqa: E501
+                    name="key"
+                ).values_list("target", flat=True)
             signatures = self.instance.associated.smarttags.filter(
                 name="key"
             )
@@ -194,7 +199,7 @@ class PostBoxForm(DataContentForm):
             self.initial["signatures"] = [
                 {
                     "key": x.target,
-                    "hash": x.target.getlist("pubkeyhash", 1)[0].split(
+                    "hash": x.target.getlist("hash", 1)[0].split(
                         "=", 1
                     )[-1],
                     "signature": x.data["signature"]
@@ -231,14 +236,15 @@ class PostBoxForm(DataContentForm):
                     "signature": None,
                     "hash": pubkey.getlist("hash", 1)[0].split(
                         "=", 1
-                    )[0]
+                    )[-1]
                 }
             )
             key_dict[smarttag.data["hash"]] = smarttag
 
         if self.instance.id:
+            keyhashes_q = Q()
             for smartkey in self.instance.associated.smarttags.filter(
-                name="key", target__in=key_dict.keys()
+                keyhashes_q, name="key"
             ):
                 key_dict[smartkey.data["hash"]] = smartkey
         for sig in self.cleaned_data.get("signatures", []):
@@ -247,6 +253,7 @@ class PostBoxForm(DataContentForm):
                 i = key_dict.get(sig["hash"])
                 if i:
                     i.data["signature"] = signature
+                print(key_dict)
 
         return {
             "smarttags": key_dict.values()
@@ -299,8 +306,8 @@ class MessageForm(DataContentForm):
             keyhashes_q = Q()
             for i in keyhashes:
                 keyhashes_q |= Q(
-                    target__info__contains="\x1epubkeyhash=%s" %
-                    i
+                    target__info__regex="\x1ehash=[^=]+=%s" %
+                    re.escape(i)
                 )
             if keyhashes:
                 self.initial["received"] = \
@@ -327,8 +334,8 @@ class MessageForm(DataContentForm):
                 keyhashes_q = Q()
                 for i in changed_data["key_list"].keys():
                     keyhashes_q |= Q(
-                        info__contains="\x1epubkeyhash=%s" %
-                        i
+                        info__regex="\x1ehash=[^=]+=%s" %
+                        re.escape(i)
                     )
                 ret["smarttags"] = [
                     SmartTag(
