@@ -310,8 +310,8 @@ def action_send(argv, priv_key, pub_key_hash, session, response, src_keys):
         """
             SELECT DISTINCT ?value
             WHERE {
-                ?property spkc:name ?name .
-                ?property spkc:value ?value .
+                ?property spkc:name ?name ;
+                          spkc:value ?value .
             }
         """,
         initNs={"spkc": spkcgraph},
@@ -326,8 +326,8 @@ def action_send(argv, priv_key, pub_key_hash, session, response, src_keys):
         """
             SELECT DISTINCT ?value
             WHERE {
-                ?property spkc:name ?name .
-                ?property spkc:value ?value .
+                ?property spkc:name ?name ;
+                          spkc:value ?value .
             }
         """,
         initNs={"spkc": spkcgraph},
@@ -340,7 +340,7 @@ def action_send(argv, priv_key, pub_key_hash, session, response, src_keys):
 
     if not q or not q2:
         logger.error("Message creation failed: %s", response.text)
-        parser.exit(1, "Message creation failed: %s" % response.text)
+        parser.exit(1, "Message creation failed")
     # extract url
     response_dest = session.post(
         webref_url, data={
@@ -445,20 +445,20 @@ def action_check(argv, priv_key, pub_key_hash, session, response):
 
     for i in g.query(
         """
-            SELECT
-            ?postbox ?key_base_prop ?key_name ?key_value
+            SELECT DISTINCT
+            ?postbox ?key_base ?key_base_prop ?key_name ?key_value
             WHERE {
                 ?postbox spkc:properties ?postbox_prop .
                 ?postbox_prop spkc:name ?postbox_prop_name .
                 ?postbox_prop spkc:value ?key_base .
                 ?key_base spkc:properties ?key_base_prop .
-                ?key_base_prop spkc:name ?key_name .
-                ?key_base_prop spkc:value ?key_value .
+                ?key_base_prop spkc:name ?key_name ;
+                               spkc:value ?key_value .
             }
         """,
         initNs={"spkc": spkcgraph},
         initBindings={
-            "postbox_name": Literal(
+            "postbox_prop_name": Literal(
                 "signatures", datatype=XSD.string
             )
         }
@@ -550,11 +550,11 @@ def main(argv):
     if not match:
         parser.exit(1, "invalid url scheme\n")
     if argv.verbose >= 2:
-        logger.setLevel(logging.DEBUG)
+        logging.basicConfig(level=logging.DEBUG)
     elif argv.verbose >= 1:
-        logger.setLevel(logging.INFO)
+        logging.basicConfig(level=logging.INFO)
     else:
-        logger.setLevel(logging.WARNING)
+        logging.basicConfig(level=logging.WARNING)
     access = match.groupdict()["access"]
     if (
         argv.action == "check" and

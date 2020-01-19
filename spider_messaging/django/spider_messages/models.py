@@ -114,7 +114,7 @@ class PostBox(DataContent):
         if context["request"].is_owner:
             return {"push_webref", "get_webref", "del_webref"}
         if (
-            not self.only_persistent or
+            not self.free_data["only_persistent"] or
             context["request"].auth_token.persist >= 0
         ):
             return {"push_webref"}
@@ -388,7 +388,7 @@ class MessageContent(DataContent):
         ret = super().get_info(unlisted=True)
 
         return "%s%s\x1e" % (
-            ret, "\x1ehash=".join(self.key_list.keys())
+            ret, "\x1ehash=".join(self.quota_data["key_list"].keys())
         )
 
     def get_form(self, scope):

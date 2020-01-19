@@ -10,10 +10,13 @@ from django.conf import settings
 from django.db.models import Q
 from django.urls import reverse
 from django.utils.translation import gettext as _
-from spkcspider.apps.spider.fields import ContentMultipleChoiceField, JsonField
+from rdflib import XSD
+from spkcspider.apps.spider.fields import (
+    ContentMultipleChoiceField, JsonField, MultipleOpenChoiceField
+)
 from spkcspider.apps.spider.forms.base import DataContentForm
 from spkcspider.apps.spider.models import (
-    AssignedContent, AttachedFile, SmartTag, AuthToken
+    AssignedContent, AttachedFile, AuthToken, SmartTag
 )
 from spkcspider.apps.spider.queryfilters import info_or
 from spkcspider.utils.security import get_hashob
@@ -154,7 +157,7 @@ class PostBoxForm(DataContentForm):
                     "size": None,
                     "sender": "%s?..." % i.quota_data["url"].split("?", 1)[0]
                 } for i in self.instance.associated.attached_contents.filter(
-                    ctype_name="WebReference"
+                    ctype__name="WebReference"
                 )
             ]
             self.fields["message_objects"].queryset = \
@@ -266,24 +269,33 @@ class MessageForm(DataContentForm):
     was_retrieved = forms.BooleanField(
         disabled=True, required=False, initial=False
     )
-    key_list = JsonField(initial=dict)
-    tokens = JsonField(initial=list)
+    key_list = JsonField(
+        initial=dict, widget=forms.Textarea()
+    )
+    tokens = MultipleOpenChoiceField(initial=list, disabled=True)
     # by own client(s)
     received = forms.BooleanField(disabled=True, required=False, initial=False)
+    amount_tokens = forms.IntegerField(min_value=0, initial=1, required=False)
+    encrypted_content = forms.FileField()
 
     first_run = False
 
+    quota_fields = {"fetch_url": None, "key_list": dict}
+
     def __init__(self, request, **kwargs):
         super().__init__(**kwargs)
-
         if self.instance.id:
             self.initial["tokens"] = \
                 [
                     token.token
                     for token in self.instance.associated.attachedtokens.all()
-                ]
+            ]
+            # hack around for current bad default JsonField widget
+            self.initial["key_list"] = json.dumps(self.initial["key_list"])
+            setattr(self.fields["key_list"], "spkc_datatype", XSD.string)
+
             self.initial["fetch_url"] = \
-                "{}://{}{}?urlpart={}/view".format(
+                "{}://{}{}?urlpart={}/view?".format(
                     request.scheme,
                     request.get_host(),
                     reverse(
@@ -291,6 +303,10 @@ class MessageForm(DataContentForm):
                     ),
                     self.instance.associated.token
                 )
+            self.initial["encrypted_content"] = \
+                self.instance.associated.attachedfiles.get(
+                    name="encrypted_content"
+                ).file
             setattr(
                 self.fields["encrypted_content"],
                 "download_url",
@@ -303,11 +319,9 @@ class MessageForm(DataContentForm):
                 "spider_messages/partials/fields/view_encrypted_content.html"
             )
             self.initial["was_retrieved"] = \
-                self.instance.associated.filter(
-                    smarttags__name="received", target=None
+                self.instance.associated.smarttags.filter(
+                    name="received", target=None
                 ).exists()
-            self.fields["key_list"].disabled = True
-            self.fields["key_list"].required = False
             keyhashes = self.data.getlist("keyhash")
             keyhashes_q = Q()
             for i in keyhashes:
@@ -320,11 +334,13 @@ class MessageForm(DataContentForm):
                     self.instance.asspciated.smarttags.filter(
                         name="received"
                     ).filter(keyhashes_q).count() == len(keyhashes)
+            del self.fields["amount_tokens"]
             self.first_run = False
         else:
             del self.fields["fetch_url"]
             del self.fields["was_retrieved"]
             del self.fields["received"]
+            del self.fields["tokens"]
             self.initial["was_retrieved"] = False
             self.first_run = True
 
@@ -338,7 +354,7 @@ class MessageForm(DataContentForm):
             self.initial["received"] = False
             if self.first_run:
                 keyhashes_q = Q()
-                for i in changed_data["key_list"].keys():
+                for i in self.cleaned_data["key_list"].keys():
                     keyhashes_q |= Q(
                         info__regex="\x1ehash=[^=]+=%s" %
                         re.escape(i)
@@ -369,26 +385,29 @@ class MessageForm(DataContentForm):
                 ret["smarttags"] = self.instance.associated.smarttags.all()
 
             for smartkey in ret["smarttags"]:
-                h = smartkey.target.getlist("hash", 1)[0].split("=", 1)[-1]
+                h = None
+                if smartkey.target:
+                    h = smartkey.target.getlist("hash", 1)[0].split("=", 1)[-1]
                 if h == self.cleaned_data["own_hash"]:
                     self.initial["received"] = True
-                self.instance.copies.update_or_create(
-                    defaults={
-                        "received": (h == self.cleaned_data["own_hash"])
-                    }, keyhash=h
-                )
+                    smartkey.name = "received"
         # don't allow new tokens after the first run
         if self.first_run:
             ret["attachedtokens"] = [
                 AuthToken(
                     persist=0,
-                    usercomponent=self.instance.usercomponent,
+                    usercomponent=self.instance.associated.usercomponent,
                     attached_to_content=self.instance.associated,
-                    extras={
-                        "ids": [-1]
+                    extra={
+                        # don't allow anything than accessing content via
+                        # view
+                        "ids": []
                     }
-                ) for _ in range(self.data["amount_tokens"])
+                ) for _ in range(self.cleaned_data.get("amount_tokens", 1))
             ]
+            # self.initial["tokens"] = [
+            #     x.token for x in ret["attachedtokens"]
+            # ]
         if "encrypted_content" in self.changed_data:
             f = None
             if self.instance.pk:
@@ -423,7 +442,10 @@ class MessageForm(DataContentForm):
         # cannot update retrieved message
         if (
             self.initial["was_retrieved"] and
-            "encrypted_content" in self.changed_data
+            (
+                "encrypted_content" in self.changed_data or
+                "key_list" in self.changed_data
+            )
         ):
             return False
 
