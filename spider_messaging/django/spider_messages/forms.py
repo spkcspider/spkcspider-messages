@@ -28,7 +28,15 @@ class ReferenceForm(DataContentForm):
     url = forms.URLField(max_length=600)
     key_list = JsonField(initial=dict)
 
+    hash_algorithm = forms.CharField(
+        disabled=True, required=False
+    )
+    setattr(hash_algorithm, "hashable", False)
+
     create = False
+
+    free_fields = {"hash_algorithm": settings.SPIDER_HASH_ALGORITHM.name}
+    quota_fields = {"url": None}
 
     def __init__(self, create=False, **kwargs):
         self.create = create
@@ -36,21 +44,26 @@ class ReferenceForm(DataContentForm):
 
     def clean(self):
         ret = super().clean()
+        if "hash_algorithm" in self.initial:
+            self.cleaned_data["hash_algorithm"] = \
+                self.initial["hash_algorithm"]
         if isinstance(self.cleaned_data["key_list"], str):
             self.cleaned_data["key_list"] = json.loads(
                 self.cleaned_data["key_list"]
             )
-        q = Q()
-        for i in self.cleaned_data["key_list"].keys():
-            q |= Q(
-                target__info__regex="\x1ehash=[^=]+=%s" %
-                re.escape(i)
-            )
+        q = info_or(
+            pubkeyhash=list(self.cleaned_data["key_list"].keys()),
+            info_fieldname="target__info"
+        )
+
+        # get from postbox key smarttags with signature
         self.cleaned_data["signatures"] = \
             self.instance.associated.attached_to_content.smarttags.filter(
-                name="keys"
-            ).filter(q)
+                name="key"
+        ).filter(q)
 
+        # check if key_list matches with signatures;
+        # otherwise MITM injection of keys are possible
         if (
             self.cleaned_data["signatures"].count() !=
             len(self.cleaned_data["key_list"])
@@ -69,7 +82,7 @@ class ReferenceForm(DataContentForm):
                     content=self.instance.associated,
                     unique=True,
                     name="unread",
-                    target=h
+                    target=h.target
                 )
                 for h in self.cleaned_data["signatures"]
             ]
@@ -138,8 +151,7 @@ class PostBoxForm(DataContentForm):
         "spider_messages/partials/fields/view_signatures.html"
     )
 
-    extract_pupkeyhash = re.compile("\x1epubkeyhash=([^\x1e=]+)=([^\x1e=]+)")
-    extract_hash = re.compile("\x1ehash=([^\x1e=]+)=([^\x1e=]+)")
+    extract_pubkeyhash = re.compile("\x1epubkeyhash=([^\x1e=]+)=([^\x1e=]+)")
 
     free_fields = {"only_persistent": False, "shared": True}
 
@@ -153,9 +165,10 @@ class PostBoxForm(DataContentForm):
         if scope in {"view", "raw", "list"} and request.is_owner:
             self.initial["webreferences"] = [
                 {
-                    "id": i.associated.id,
+                    "id": i.id,
                     "size": None,
-                    "sender": "%s?..." % i.quota_data["url"].split("?", 1)[0]
+                    "hash_algorithm": i.content.free_data["hash_algorithm"],
+                    "sender": "%s?..." % i.content.quota_data["url"].split("?", 1)[0]  # noqa: E501
                 } for i in self.instance.associated.attached_contents.filter(
                     ctype__name="WebReference"
                 )
@@ -168,10 +181,8 @@ class PostBoxForm(DataContentForm):
             if self.data.get("view_all", "") != "true" and keyhashes:
                 self.fields["message_objects"].queryset = \
                     self.fields["message_objects"].queryset.filter(
-                        info_or(hash=keyhashes)
+                        info_or(pubkeyhash=keyhashes, hash=keyhashes)
                     )
-        elif scope == "export":
-            del self.fields["message_objects"]
         else:
             del self.fields["webreferences"]
             del self.fields["message_objects"]
@@ -187,7 +198,7 @@ class PostBoxForm(DataContentForm):
                 name="key"
             )
             mapped_hashes = map(
-                lambda x: self.extract_pupkeyhash.search(x).group(2),
+                lambda x: self.extract_pubkeyhash.search(x).group(2),
                 signatures.values_list(
                     "target__info", flat=True
                 )
@@ -202,9 +213,7 @@ class PostBoxForm(DataContentForm):
             self.initial["signatures"] = [
                 {
                     "key": x.target,
-                    "hash": x.target.getlist("hash", 1)[0].split(
-                        "=", 1
-                    )[-1],
+                    "hash": x.target.getlist("hash", 1)[0],
                     "signature": x.data["signature"]
                 } for x in signatures.all()
             ]
@@ -237,9 +246,7 @@ class PostBoxForm(DataContentForm):
                 target=pubkey,
                 data={
                     "signature": None,
-                    "hash": pubkey.getlist("hash", 1)[0].split(
-                        "=", 1
-                    )[-1]
+                    "hash": pubkey.getlist("hash", 1)[0]
                 }
             )
             key_dict[smarttag.data["hash"]] = smarttag
@@ -278,8 +285,14 @@ class MessageForm(DataContentForm):
     amount_tokens = forms.IntegerField(min_value=0, initial=1, required=False)
     encrypted_content = forms.FileField()
 
+    hash_algorithm = forms.CharField(
+        disabled=True, required=False
+    )
+    setattr(hash_algorithm, "hashable", False)
+
     first_run = False
 
+    free_fields = {"hash_algorithm": settings.SPIDER_HASH_ALGORITHM.name}
     quota_fields = {"fetch_url": None, "key_list": dict}
 
     def __init__(self, request, **kwargs):
@@ -323,12 +336,10 @@ class MessageForm(DataContentForm):
                     name="received", target=None
                 ).exists()
             keyhashes = self.data.getlist("keyhash")
-            keyhashes_q = Q()
-            for i in keyhashes:
-                keyhashes_q |= Q(
-                    target__info__regex="\x1ehash=[^=]+=%s" %
-                    re.escape(i)
-                )
+            keyhashes_q = info_or(
+                pubkeyhash=keyhashes, hash=keyhashes,
+                info_fieldname="target__info"
+            )
             if keyhashes:
                 self.initial["received"] = \
                     self.instance.asspciated.smarttags.filter(
@@ -353,21 +364,17 @@ class MessageForm(DataContentForm):
         ):
             self.initial["received"] = False
             if self.first_run:
-                keyhashes_q = Q()
-                for i in self.cleaned_data["key_list"].keys():
-                    keyhashes_q |= Q(
-                        info__regex="\x1ehash=[^=]+=%s" %
-                        re.escape(i)
-                    )
+                keyhashes_q = info_or(
+                    hash=self.cleaned_data["key_list"],
+                    pubkeyhash=self.cleaned_data["key_list"]
+                )
                 ret["smarttags"] = [
                     SmartTag(
                         content=self.instance.associated,
                         unique=True,
                         name="unread",
                         target=t,
-                        data={"hash": t.getlist("hash", 1)[0].split(
-                            "=", 1
-                        )[0]}
+                        data={"hash": t.getlist("hash", 1)[0]}
                     ) for t in self.instance.associated.usercomponent.contents.filter(  # noqa: E501
                         ctype__name="PublicKey"
                     ).filter(keyhashes_q)
@@ -385,10 +392,12 @@ class MessageForm(DataContentForm):
                 ret["smarttags"] = self.instance.associated.smarttags.all()
 
             for smartkey in ret["smarttags"]:
-                h = None
+                h1 = None
+                h2 = None
                 if smartkey.target:
-                    h = smartkey.target.getlist("hash", 1)[0].split("=", 1)[-1]
-                if h == self.cleaned_data["own_hash"]:
+                    h1 = smartkey.target.getlist("hash", 1)[0]
+                    h2 = smartkey.target.getlist("pubkeyhash", 1)[0]
+                if self.cleaned_data["own_hash"] in {h1, h2}:
                     self.initial["received"] = True
                     smartkey.name = "received"
         # don't allow new tokens after the first run
@@ -425,6 +434,9 @@ class MessageForm(DataContentForm):
 
     def clean(self):
         super().clean()
+        if "hash_algorithm" in self.initial:
+            self.cleaned_data["hash_algorithm"] = \
+                self.initial["hash_algorithm"]
         if self.first_run:
             postbox = \
                 self.instance.associated.usercomponent.contents.filter(

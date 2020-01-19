@@ -195,7 +195,7 @@ def action_send(argv, priv_key, pub_key_hash, session, response, src_keys):
     dest = {}
     g_dest = Graph()
     g_dest.parse(data=response_dest.content, format="turtle")
-    dest_postbox_url, webref_url, dest, dest_hash = analyse_dest(g_dest)
+    dest_postbox_url, webref_url, dest, dest_hash_algo = analyse_dest(g_dest)
 
     bdomain = dest_postbox_url.split("?", 1)[0]
     result_dest, _, dest_keys = argv.attestation.check(
@@ -204,7 +204,7 @@ def action_send(argv, priv_key, pub_key_hash, session, response, src_keys):
             lambda x: (x["key"], x["signature"]),
             dest.values()
         ),
-        algo=dest_hash
+        algo=dest_hash_algo
     )
     if result_dest == AttestationResult.domain_unknown:
         logger.info("add domain: %s", bdomain)
@@ -214,7 +214,7 @@ def action_send(argv, priv_key, pub_key_hash, session, response, src_keys):
                 lambda x: (x["key"], x["signature"]),
                 dest.values()
             ),
-            algo=dest_hash
+            algo=dest_hash_algo
         )
     elif result_dest == AttestationResult.error:
         logger.critical("Dest base url contains invalid keys.")
@@ -237,8 +237,9 @@ def action_send(argv, priv_key, pub_key_hash, session, response, src_keys):
                 )
             )
             # encrypt decryption key
-            src_key_list[k[0].hex()] = \
-                base64.urlsafe_b64encode(enc).decode("ascii")
+            src_key_list[
+                "%s=%s" % (argv.src_hash_algo.name, k[0].hex())
+            ] = base64.urlsafe_b64encode(enc).decode("ascii")
     else:
         enc = priv_key.public_key().encrypt(
             aes_key,
@@ -248,20 +249,22 @@ def action_send(argv, priv_key, pub_key_hash, session, response, src_keys):
             )
         )
         # encrypt decryption key
-        src_key_list[pub_key_hash] = \
-            base64.urlsafe_b64encode(enc).decode("ascii")
+        src_key_list[
+            "%s=%s" % (argv.src_hash_algo.name, pub_key_hash)
+        ] = base64.urlsafe_b64encode(enc).decode("ascii")
 
     for k in dest_keys:
         enc = k[1].encrypt(
             aes_key,
             padding.OAEP(
-                mgf=padding.MGF1(algorithm=dest_hash),
-                algorithm=dest_hash, label=None
+                mgf=padding.MGF1(algorithm=dest_hash_algo),
+                algorithm=dest_hash_algo, label=None
             )
         )
         # encrypt decryption key
-        dest_key_list[k[0].hex()] = \
-            base64.urlsafe_b64encode(enc).decode("ascii")
+        dest_key_list[
+            "%s=%s" % (dest_hash_algo.name, k[0].hex())
+        ] = base64.urlsafe_b64encode(enc).decode("ascii")
     ctx = AESGCM(aes_key)
     headers = b"SPKC-Type: message\n"
     blob = ctx.encrypt(
@@ -308,7 +311,7 @@ def action_send(argv, priv_key, pub_key_hash, session, response, src_keys):
     g.parse(data=response.content, format="html")
     q = list(g.query(
         """
-            SELECT DISTINCT ?value
+            SELECT ?value
             WHERE {
                 ?property spkc:name ?name ;
                           spkc:value ?value .
@@ -324,7 +327,7 @@ def action_send(argv, priv_key, pub_key_hash, session, response, src_keys):
 
     q2 = list(g.query(
         """
-            SELECT DISTINCT ?value
+            SELECT ?value
             WHERE {
                 ?property spkc:name ?name ;
                           spkc:value ?value .
@@ -352,10 +355,43 @@ def action_send(argv, priv_key, pub_key_hash, session, response, src_keys):
     response_dest.raise_for_status()
 
 
-def action_view(argv, priv_key, pub_key_hash, session, response):
+def action_view(argv, priv_key, pem_public, session, response):
     g_message = Graph()
     g_message.parse(data=response.content, format="turtle")
     if argv.message_id is not None:
+        tmp = list(g_message.query(
+            """
+                SELECT DISTINCT ?value
+                WHERE {
+                    ?base spkc:properties ?prop_alg, ?prop_id .
+                    ?prop_id spkc:name ?idname ;
+                             spkc:value ?idvalue .
+                    ?prop_alg spkc:name ?algname ;
+                              spkc:value ?value .
+                }
+            """,
+            initNs={"spkc": spkcgraph},
+            initBindings={
+                "idvalue": Literal(argv.message_id),
+                "algname": Literal(
+                    "hash_algorithm", datatype=XSD.string
+                ),
+                "idname": Literal(
+                    "id", datatype=XSD.string
+                ),
+
+            }
+        ))
+        pub_key_hasher = getattr(
+            hashes, tmp[0].upper()
+        )()
+
+        digest = hashes.Hash(argv.src_hash_algo, backend=default_backend())
+        digest.update(pem_public)
+        pub_key_hashalg = "%s%s" % (
+            pub_key_hasher.name,
+            digest.finalize().hex()
+        )
         postbox_url = g_message.value(
             predicate=spkcgraph["type"],
             object=Literal("PostBox", datatype=XSD.string)
@@ -376,17 +412,14 @@ def action_view(argv, priv_key, pub_key_hash, session, response):
                 getref_url, headers={
                     "X-TOKEN": argv.token
                 }, data={
-                    "keyhash": pub_key_hash
+                    "keyhash": pub_key_hashalg
                 }
             )
         if not response.ok:
-            logger.info("Message retrievel failed: %s", response.text)
+            logger.info("Message retrieval failed: %s", response.text)
             parser.exit(0, "message not found\n")
-        # own_key_hash = getattr(
-        #     hashes, response.headers["X-KEYHASH-ALGO"].upper()
-        # )()
         key_list = json.loads(response.headers["X-KEYLIST"])
-        key = key_list.get(pub_key_hash, None)
+        key = key_list.get(pub_key_hashalg, None)
         if not key:
             parser.exit(0, "message not for me\n")
         decrypted_key = priv_key.decrypt(
@@ -676,7 +709,7 @@ def main(argv):
                 argv, priv_key, pub_key_hash, s, response, src_keys
             )
         elif argv.action in {"view", "peek"}:
-            return action_view(argv, priv_key, pub_key_hash, s, response)
+            return action_view(argv, priv_key, pem_public, s, response)
         elif argv.action == "check":
             ret = action_check(argv, priv_key, pub_key_hash, s, response)
             if ret is not True:

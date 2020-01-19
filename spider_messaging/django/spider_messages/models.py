@@ -18,7 +18,7 @@ from rdflib import XSD, BNode, Literal
 from spkcspider.apps.spider import registry
 from spkcspider.apps.spider.conf import get_requests_params
 from spkcspider.apps.spider.models import (
-    AssignedContent, AttachedFile, DataContent
+    AssignedContent, AttachedFile, DataContent, ContentVariant
 )
 from spkcspider.constants import VariantType, spkcgraph
 from spkcspider.utils.fields import add_by_field, add_property, literalize
@@ -131,8 +131,11 @@ class PostBox(DataContent):
         form = ReferenceForm(
             instance=WebReference.static_create(
                 associated_kwargs={
-                    "usercomponent": self.usercomponent,
-                    "attached_to_content": self
+                    "usercomponent": self.associated.usercomponent,
+                    "attached_to_content": self.associated,
+                    "ctype": ContentVariant.objects.get(
+                        name="WebReference"
+                    )
                 }
             ),
             create=True,
@@ -203,6 +206,10 @@ class WebReference(DataContent):
                     "used_space_local", "used_space_remote"
                 ]
             )
+
+    def get_form(self, scope):
+        from .forms import ReferenceForm
+        return ReferenceForm
 
     def access_redirect(self, kwargs):
         ret = HttpResponsePermanentRedirect(
@@ -354,7 +361,8 @@ class WebReference(DataContent):
             q
         )
         # ret["X-TYPE"] = kwargs["rtype"].name
-        ret["X-KEYLIST"] = json.dumps(self.key_list)
+        ret["X-KEYLIST"] = json.dumps(self.quota_data["key_list"])
+        ret["X-KEYHASH-ALGO"] = self.free_data["hash_algorithm"]
         return ret
 
 

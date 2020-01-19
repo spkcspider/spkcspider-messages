@@ -11,7 +11,7 @@ python = ">=3.6"
 rdflib = '*'
 html5lib = '*'
 cryptography = "*"
-spkcspider = {version = ">=0.24", optional=true}
+spkcspider = {version = ">=0.27", optional=true}
 spkcspider-domainauth = {version = ">=0.4", optional=true}
 
 twisted = {version = "*", optional=true}
@@ -24,7 +24,7 @@ django-extensions = "*"
 twisted = "*"
 pyOpenSSL = "*"
 service_identity = "*"
-spkcspider = {version = ">=0.26"}
+spkcspider = {version = ">=0.27"}
 spkcspider-domainauth = {version = ">=0.4"}
 
 
