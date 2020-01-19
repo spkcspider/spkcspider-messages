@@ -279,7 +279,6 @@ def action_send(argv, priv_key, pub_key_hash, session, response, src_keys):
             "X-TOKEN": argv.token
         }
     )
-    utokens = [base64.urlsafe_b64encode(os.urandom(20)).decode("ascii")]
     if not response.ok:
         logger.error("retrieval csrftoken failed: %s", response.text)
         parser.exit(1, "retrieval csrftoken failed: %s" % response.text)
@@ -291,7 +290,7 @@ def action_send(argv, priv_key, pub_key_hash, session, response, src_keys):
         message_create_url, data={
             "own_hash": pub_key_hash,
             "key_list": json.dumps(src_key_list),
-            "utokens": utokens
+            "amount_tokens": 1
         }, headers={
             "X-CSRFToken": csrftoken,
             "X-TOKEN": argv.token  # only for src
@@ -323,13 +322,29 @@ def action_send(argv, priv_key, pub_key_hash, session, response, src_keys):
         }
     ))
 
-    if not q:
+    q2 = list(g.query(
+        """
+            SELECT DISTINCT ?value
+            WHERE {
+                ?property spkc:name ?name .
+                ?property spkc:value ?value .
+            }
+        """,
+        initNs={"spkc": spkcgraph},
+        initBindings={
+            "name": Literal(
+                "tokens", datatype=XSD.string
+            )
+        }
+    ))
+
+    if not q or not q2:
         logger.error("Message creation failed: %s", response.text)
         parser.exit(1, "Message creation failed: %s" % response.text)
     # extract url
     response_dest = session.post(
         webref_url, data={
-            "url": merge_get_url(q[0].value, utoken=utokens[0]),
+            "url": merge_get_url(q[0].value, token=str(q2[0])),
             "rtype": ReferenceType.message,
             "key_list": json.dumps(dest_key_list)
         }

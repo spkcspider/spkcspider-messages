@@ -33,10 +33,10 @@ class MessageContentView(UserTestMixin, View):
 
     def get_object(self):
         try:
-
-            return AssignedContent.objects.from_token(
-                self.request.GET.get("token", ""), variant="MessageContent"
-            )[0]
+            return AssignedContent.objects.get(
+                attachedtokens__in=self.receivers,
+                ctype__name="MessageContent"
+            )
         except (
             AssignedContent.DoesNotExist,
             AssignedContent.MultipleObjectsReturned

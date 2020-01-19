@@ -267,6 +267,7 @@ class MessageForm(DataContentForm):
         disabled=True, required=False, initial=False
     )
     key_list = JsonField(initial=dict)
+    tokens = JsonField(initial=list)
     # by own client(s)
     received = forms.BooleanField(disabled=True, required=False, initial=False)
 
@@ -276,6 +277,11 @@ class MessageForm(DataContentForm):
         super().__init__(**kwargs)
 
         if self.instance.id:
+            self.initial["tokens"] = \
+                [
+                    token.token
+                    for token in self.instance.associated.attachedtokens.all()
+                ]
             self.initial["fetch_url"] = \
                 "{}://{}{}?urlpart={}/view".format(
                     request.scheme,
@@ -377,8 +383,11 @@ class MessageForm(DataContentForm):
                 AuthToken(
                     persist=0,
                     usercomponent=self.instance.usercomponent,
-                    attached_to_content=self.instance.associated
-                ) for utoken in self.data.getlist("utokens")
+                    attached_to_content=self.instance.associated,
+                    extras={
+                        "ids": [-1]
+                    }
+                ) for _ in range(self.data["amount_tokens"])
             ]
         if "encrypted_content" in self.changed_data:
             f = None
