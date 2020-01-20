@@ -14,7 +14,7 @@ from django.http import HttpResponse, HttpResponsePermanentRedirect
 from django.test import Client
 from django.utils.translation import pgettext
 from django.views.decorators.csrf import csrf_exempt
-from rdflib import XSD, BNode, Literal
+from rdflib import XSD, Literal
 from spkcspider.apps.spider import registry
 from spkcspider.apps.spider.conf import get_requests_params
 from spkcspider.apps.spider.models import (
@@ -55,21 +55,7 @@ class PostBox(DataContent):
 
     def map_data(self, name, field, data, graph, context):
         if name == "webreferences":
-            # per node create a message anonymous Node
-            ret = BNode()
-            for nname, val in data.items():
-                value_node = add_property(
-                    graph, nname, ref=ret,
-                    literal=literalize(
-                        val, field, domain_base=context["hostpart"]
-                    )
-                )
-
-                graph.add((
-                    value_node,
-                    spkcgraph["hashable"],
-                    Literal(False)
-                ))
+            ret = literalize(data["object"], domain_base=context["hostpart"])
             return ret
         elif name == "signatures":
             # per node create a signature Entity
@@ -206,6 +192,15 @@ class WebReference(DataContent):
                     "used_space_local", "used_space_remote"
                 ]
             )
+
+    def get_content_name(self):
+        url = self.quota_data["url"].split("?", 1)[0]
+        if len(url) > 30:
+            url = f"{url[:30]}..."
+        return "{}{}: {}?...".format(
+            self.localize_name(self.associated.ctype.name),
+            self.associated_id,
+        )
 
     def get_form(self, scope):
         from .forms import ReferenceForm

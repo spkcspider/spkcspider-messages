@@ -29,7 +29,7 @@ class ReferenceForm(DataContentForm):
     key_list = JsonField(initial=dict)
 
     hash_algorithm = forms.CharField(
-        disabled=True, required=False
+        required=False, disabled=True
     )
     setattr(hash_algorithm, "hashable", False)
 
@@ -41,10 +41,15 @@ class ReferenceForm(DataContentForm):
     def __init__(self, create=False, **kwargs):
         self.create = create
         super().__init__(**kwargs)
+        if self.create:
+            self.fields["hash_algorithm"].disabled = False
 
     def clean(self):
         ret = super().clean()
-        if "hash_algorithm" in self.initial:
+        if (
+            "hash_algorithm" not in self.cleaned_data and
+            "hash_algorithm" in self.initial
+        ):
             self.cleaned_data["hash_algorithm"] = \
                 self.initial["hash_algorithm"]
         if isinstance(self.cleaned_data["key_list"], str):
@@ -165,10 +170,15 @@ class PostBoxForm(DataContentForm):
         if scope in {"view", "raw", "list"} and request.is_owner:
             self.initial["webreferences"] = [
                 {
-                    "id": i.id,
-                    "size": None,
-                    "hash_algorithm": i.content.free_data["hash_algorithm"],
-                    "sender": "%s?..." % i.content.quota_data["url"].split("?", 1)[0]  # noqa: E501
+                    "object": i,
+                    "items": {
+                        "id": i.id,
+                        "size": None,
+                        "hash_algorithm":
+                            i.content.free_data["hash_algorithm"],
+                        "sender":
+                            i.name
+                    }
                 } for i in self.instance.associated.attached_contents.filter(
                     ctype__name="WebReference"
                 )

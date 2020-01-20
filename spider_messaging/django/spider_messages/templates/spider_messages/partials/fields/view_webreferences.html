@@ -5,10 +5,10 @@
   {% hashable_literalize field as hashable %}
   <data hidden="hidden" property="spkc:hashable" datatype="xsd:boolean">{{hashable}}</data>
   <div>{{ field.label_tag }}</div>
-  <ul class="w3-white">
+  <ul class="w3-white" rel="spkc:value">
     {% for val in field|field_to_python %}
-      <data typeof="spkc:Entity">
-        <span>{% trans 'Sender' %}: {{val.sender|default:val.sender}}</span>
+      <data resource="val.object.get_absolute_url" typeof="spkc:Content">
+        <span>{% trans 'Sender' %}: {{val.items.items.sender|default:val.sender}}</span>
         <data hidden="hidden" rel="spkc:properties">
           {% for d in val.items %}
             {% literalize d.1 as LiteralData %}
@@ -28,7 +28,7 @@
 
 <data>
   {% for message in widget.value %}
-    <data hidden="hidden" typeof="spkc:Entity">
+    <data hidden="hidden" typeof="spkc:Content">
       <data hidden="hidden" rel="spkc:properties">
         {% for d in message.items %}
           {% literalize d.1 as LiteralData %}

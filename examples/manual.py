@@ -58,7 +58,7 @@ view_parser.add_argument(
     nargs="?", default=sys.stdout.buffer
 )
 view_parser.add_argument(
-    'message_id', help='View message with id', nargs="?"
+    'message_id', help='View message with id', nargs="?", type=int
 )
 peek_parser = subparsers.add_parser("peek")
 peek_parser.add_argument(
@@ -66,7 +66,7 @@ peek_parser.add_argument(
     nargs="?", default=sys.stdout.buffer
 )
 peek_parser.add_argument(
-    'message_id', help='View message with id', nargs="?"
+    'message_id', help='View message with id', nargs="?", type=int
 )
 check_parser = subparsers.add_parser("check")
 check_parser.add_argument(
@@ -359,15 +359,17 @@ def action_view(argv, priv_key, pem_public, session, response):
     g_message = Graph()
     g_message.parse(data=response.content, format="turtle")
     if argv.message_id is not None:
+        assert isinstance(argv.message_id, int)
         tmp = list(g_message.query(
             """
                 SELECT DISTINCT ?value
                 WHERE {
-                    ?base spkc:properties ?prop_alg, ?prop_id .
-                    ?prop_id spkc:name ?idname ;
-                             spkc:value ?idvalue .
-                    ?prop_alg spkc:name ?algname ;
-                              spkc:value ?value .
+                    ?base a spkc:Content .
+                    ?base spkc:properties ?propalg , ?propid .
+                    ?propid spkc:name ?idname ;
+                            spkc:value ?idvalue .
+                    ?propalg spkc:name ?algname ;
+                             spkc:value ?value .
                 }
             """,
             initNs={"spkc": spkcgraph},
