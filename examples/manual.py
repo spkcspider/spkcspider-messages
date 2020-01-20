@@ -327,10 +327,11 @@ def action_send(argv, priv_key, pub_key_hash, session, response, src_keys):
 
     q2 = list(g.query(
         """
-            SELECT ?value
+            SELECT ?token
             WHERE {
-                ?property spkc:name ?name ;
-                          spkc:value ?value .
+                ?property a spkc:Property ;
+                          spkc:name ?name ;
+                          spkc:value ?token .
             }
         """,
         initNs={"spkc": spkcgraph},
@@ -345,6 +346,7 @@ def action_send(argv, priv_key, pub_key_hash, session, response, src_keys):
         logger.error("Message creation failed: %s", response.text)
         parser.exit(1, "Message creation failed")
     # extract url
+    breakpoint()
     response_dest = session.post(
         webref_url, data={
             "url": merge_get_url(q[0].value, token=str(q2[0])),
@@ -468,7 +470,7 @@ def action_view(argv, priv_key, pem_public, session, response):
             parser.exit(1, "message references not found; logged in?\n")
         print("Messages:")
         for i in sorted(queried.values(), key=lambda x: x["id"]):
-            print(i["id"], i["sender"])
+            print(i["id"], i["name"])
 
 
 def action_check(argv, priv_key, pub_key_hash, session, response):

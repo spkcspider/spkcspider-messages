@@ -5,6 +5,7 @@ import binascii
 import json
 import re
 
+from cryptography.hazmat.primitives import hashes
 from django import forms
 from django.conf import settings
 from django.db.models import Q
@@ -22,76 +23,6 @@ from spkcspider.apps.spider.queryfilters import info_or
 from spkcspider.utils.security import get_hashob
 
 from .widgets import EntityListWidget, SignatureWidget
-
-
-class ReferenceForm(DataContentForm):
-    url = forms.URLField(max_length=600)
-    key_list = JsonField(initial=dict)
-
-    hash_algorithm = forms.CharField(
-        required=False, disabled=True
-    )
-    setattr(hash_algorithm, "hashable", False)
-
-    create = False
-
-    free_fields = {"hash_algorithm": settings.SPIDER_HASH_ALGORITHM.name}
-    quota_fields = {"url": None}
-
-    def __init__(self, create=False, **kwargs):
-        self.create = create
-        super().__init__(**kwargs)
-        if self.create:
-            self.fields["hash_algorithm"].disabled = False
-
-    def clean(self):
-        ret = super().clean()
-        if (
-            "hash_algorithm" not in self.cleaned_data and
-            "hash_algorithm" in self.initial
-        ):
-            self.cleaned_data["hash_algorithm"] = \
-                self.initial["hash_algorithm"]
-        if isinstance(self.cleaned_data["key_list"], str):
-            self.cleaned_data["key_list"] = json.loads(
-                self.cleaned_data["key_list"]
-            )
-        q = info_or(
-            pubkeyhash=list(self.cleaned_data["key_list"].keys()),
-            info_fieldname="target__info"
-        )
-
-        # get from postbox key smarttags with signature
-        self.cleaned_data["signatures"] = \
-            self.instance.associated.attached_to_content.smarttags.filter(
-                name="key"
-        ).filter(q)
-
-        # check if key_list matches with signatures;
-        # otherwise MITM injection of keys are possible
-        if (
-            self.cleaned_data["signatures"].count() !=
-            len(self.cleaned_data["key_list"])
-        ):
-            self.add_error("key_list", forms.ValidationError(
-                _("invalid keys"),
-                code="invalid_keys"
-            ))
-        return ret
-
-    def get_prepared_attachements(self):
-        ret = {}
-        if self.create:
-            ret["smarttags"] = [
-                SmartTag(
-                    content=self.instance.associated,
-                    unique=True,
-                    name="unread",
-                    target=h.target
-                )
-                for h in self.cleaned_data["signatures"]
-            ]
-        return ret
 
 
 class PostBoxForm(DataContentForm):
@@ -280,6 +211,84 @@ class PostBoxForm(DataContentForm):
         }
 
 
+class ReferenceForm(DataContentForm):
+    url = forms.URLField(max_length=600)
+    key_list = JsonField(
+        widget=forms.Textarea()
+    )
+
+    hash_algorithm = forms.CharField(
+        required=False, disabled=False
+    )
+    setattr(hash_algorithm, "hashable", False)
+
+    create = False
+
+    free_fields = {"hash_algorithm": None}
+    quota_fields = {"url": None, "key_list": dict}
+
+    def __init__(self, create=False, **kwargs):
+        self.create = create
+        super().__init__(**kwargs)
+        if not self.create:
+            self.fields["hash_algorithm"].disabled = True
+
+    def clean_hash_algorithm(self):
+        ret = self.cleaned_data["hash_algorithm"]
+        if ret and not hasattr(hashes, ret.upper()):
+            raise forms.ValidationError(
+                _("invalid hash algorithm")
+            )
+        return ret
+
+    def clean(self):
+        ret = super().clean()
+        if "hash_algorithm" not in self.cleaned_data:
+            ret["hash_algorithm"] = self.initial.get(
+                "hash_algorithm", settings.SPIDER_HASH_ALGORITHM.name
+            )
+        if isinstance(self.cleaned_data["key_list"], str):
+            self.cleaned_data["key_list"] = json.loads(
+                self.cleaned_data["key_list"]
+            )
+        q = info_or(
+            pubkeyhash=list(self.cleaned_data["key_list"].keys()),
+            info_fieldname="target__info"
+        )
+
+        # get from postbox key smarttags with signature
+        self.cleaned_data["signatures"] = \
+            self.instance.associated.attached_to_content.smarttags.filter(
+                name="key"
+        ).filter(q)
+
+        # check if key_list matches with signatures;
+        # otherwise MITM injection of keys are possible
+        if (
+            self.cleaned_data["signatures"].count() !=
+            len(self.cleaned_data["key_list"])
+        ):
+            self.add_error("key_list", forms.ValidationError(
+                _("invalid keys"),
+                code="invalid_keys"
+            ))
+        return ret
+
+    def get_prepared_attachements(self):
+        ret = {}
+        if self.create:
+            ret["smarttags"] = [
+                SmartTag(
+                    content=self.instance.associated,
+                    unique=True,
+                    name="unread",
+                    target=h.target
+                )
+                for h in self.cleaned_data["signatures"]
+            ]
+        return ret
+
+
 class MessageForm(DataContentForm):
     own_hash = forms.CharField(required=False, initial="")
     fetch_url = forms.CharField(disabled=True, required=False, initial="")
@@ -296,7 +305,7 @@ class MessageForm(DataContentForm):
     encrypted_content = forms.FileField()
 
     hash_algorithm = forms.CharField(
-        disabled=True, required=False
+        disabled=False, required=False
     )
     setattr(hash_algorithm, "hashable", False)
 
@@ -308,6 +317,7 @@ class MessageForm(DataContentForm):
     def __init__(self, request, **kwargs):
         super().__init__(**kwargs)
         if self.instance.id:
+            self.fields["hash_algorithm"].disabled = True
             self.initial["tokens"] = \
                 [
                     token.token
@@ -318,13 +328,12 @@ class MessageForm(DataContentForm):
             setattr(self.fields["key_list"], "spkc_datatype", XSD.string)
 
             self.initial["fetch_url"] = \
-                "{}://{}{}?urlpart={}/view?".format(
+                "{}://{}{}?".format(
                     request.scheme,
                     request.get_host(),
                     reverse(
                         "spider_messages:message"
-                    ),
-                    self.instance.associated.token
+                    )
                 )
             self.initial["encrypted_content"] = \
                 self.instance.associated.attachedfiles.get(
@@ -368,6 +377,10 @@ class MessageForm(DataContentForm):
     def get_prepared_attachements(self):
         ret = {}
         changed_data = self.changed_data
+        if "hash_algorithm" not in self.cleaned_data:
+            ret["hash_algorithm"] = self.initial.get(
+                "hash_algorithm", settings.SPIDER_HASH_ALGORITHM.name
+            )
         # create or update keys
         if (
             "key_list" in changed_data or "encrypted_content" in changed_data
@@ -440,6 +453,14 @@ class MessageForm(DataContentForm):
                 )
             f.file = self.cleaned_data["encrypted_content"]
             ret["attachedfiles"] = [f]
+        return ret
+
+    def clean_hash_algorithm(self):
+        ret = self.cleaned_data["hash_algorithm"]
+        if ret and not hasattr(hashes, ret.upper()):
+            raise forms.ValidationError(
+                _("invalid hash algorithm")
+            )
         return ret
 
     def clean(self):

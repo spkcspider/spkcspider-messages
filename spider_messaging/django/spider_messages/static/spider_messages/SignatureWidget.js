@@ -44,9 +44,9 @@ document.addEventListener("DOMContentLoaded", function(){
             },
             "signature": {
               "type": "string",
+              "format": "textarea",
               "options": {
                 "inputAttributes": {
-
                   "form": "_dump_form"
                 }
               }

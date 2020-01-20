@@ -154,9 +154,6 @@ class PostBox(DataContent):
         ret.delete()
         return HttpResponse(status=200)
 
-    def get_info(self):
-        return super().get_info(unlisted=True)
-
 
 @add_by_field(registry.contents, "_meta.model_name")
 class WebReference(DataContent):
@@ -193,6 +190,12 @@ class WebReference(DataContent):
                 ]
             )
 
+    def get_priority(self):
+        return -10
+
+    def get_info(self):
+        return super().get_info(unlisted=True)
+
     def get_content_name(self):
         url = self.quota_data["url"].split("?", 1)[0]
         if len(url) > 30:
@@ -200,6 +203,7 @@ class WebReference(DataContent):
         return "{}{}: {}?...".format(
             self.localize_name(self.associated.ctype.name),
             self.associated_id,
+            url
         )
 
     def get_form(self, scope):
