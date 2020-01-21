@@ -309,7 +309,7 @@ def action_send(argv, priv_key, pub_key_hash, session, response, src_keys):
         parser.exit(1, "Message creation failed: %s" % response.text)
     g = Graph()
     g.parse(data=response.content, format="html")
-    q = list(g.query(
+    fetch_url = list(map(lambda x: x.value, g.query(
         """
             SELECT ?value
             WHERE {
@@ -323,15 +323,14 @@ def action_send(argv, priv_key, pub_key_hash, session, response, src_keys):
                 "fetch_url", datatype=XSD.string
             )
         }
-    ))
+    )))
 
-    q2 = list(g.query(
+    tokens = list(map(lambda x: x.value, g.query(
         """
-            SELECT ?token
+            SELECT ?value
             WHERE {
-                ?property a spkc:Property ;
-                          spkc:name ?name ;
-                          spkc:value ?token .
+                ?property spkc:name ?name ;
+                          spkc:value ?value .
             }
         """,
         initNs={"spkc": spkcgraph},
@@ -340,16 +339,15 @@ def action_send(argv, priv_key, pub_key_hash, session, response, src_keys):
                 "tokens", datatype=XSD.string
             )
         }
-    ))
+    )))
 
-    if not q or not q2:
+    if not fetch_url or not tokens:
         logger.error("Message creation failed: %s", response.text)
         parser.exit(1, "Message creation failed")
     # extract url
-    breakpoint()
     response_dest = session.post(
         webref_url, data={
-            "url": merge_get_url(q[0].value, token=str(q2[0])),
+            "url": merge_get_url(fetch_url, token=str(tokens[0])),
             "rtype": ReferenceType.message,
             "key_list": json.dumps(dest_key_list)
         }

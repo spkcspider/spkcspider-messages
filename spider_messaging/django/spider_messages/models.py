@@ -395,7 +395,7 @@ class MessageContent(DataContent):
         ret = super().get_info(unlisted=True)
 
         return "%s%s\x1e" % (
-            ret, "\x1ehash=".join(self.quota_data["key_list"].keys())
+            ret, "\x1epubkeyhash=".join(self.quota_data["key_list"].keys())
         )
 
     def get_form(self, scope):

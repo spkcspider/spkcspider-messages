@@ -230,6 +230,10 @@ class ReferenceForm(DataContentForm):
     def __init__(self, create=False, **kwargs):
         self.create = create
         super().__init__(**kwargs)
+        self.initial.setdefault(
+            "hash_algorithm",
+            settings.SPIDER_HASH_ALGORITHM.name
+        )
         if not self.create:
             self.fields["hash_algorithm"].disabled = True
 
@@ -290,7 +294,10 @@ class ReferenceForm(DataContentForm):
 
 
 class MessageForm(DataContentForm):
-    own_hash = forms.CharField(required=False, initial="")
+    own_hash = forms.CharField(
+        widget=forms.HiddenInput(),
+        required=False
+    )
     fetch_url = forms.CharField(disabled=True, required=False, initial="")
     was_retrieved = forms.BooleanField(
         disabled=True, required=False, initial=False
@@ -311,7 +318,7 @@ class MessageForm(DataContentForm):
 
     first_run = False
 
-    free_fields = {"hash_algorithm": settings.SPIDER_HASH_ALGORITHM.name}
+    free_fields = {"hash_algorithm": None}
     quota_fields = {"fetch_url": None, "key_list": dict}
 
     def __init__(self, request, **kwargs):
@@ -371,16 +378,16 @@ class MessageForm(DataContentForm):
             del self.fields["was_retrieved"]
             del self.fields["received"]
             del self.fields["tokens"]
+            self.initial.setdefault(
+                "hash_algorithm",
+                settings.SPIDER_HASH_ALGORITHM.name
+            )
             self.initial["was_retrieved"] = False
             self.first_run = True
 
     def get_prepared_attachements(self):
         ret = {}
         changed_data = self.changed_data
-        if "hash_algorithm" not in self.cleaned_data:
-            ret["hash_algorithm"] = self.initial.get(
-                "hash_algorithm", settings.SPIDER_HASH_ALGORITHM.name
-            )
         # create or update keys
         if (
             "key_list" in changed_data or "encrypted_content" in changed_data
