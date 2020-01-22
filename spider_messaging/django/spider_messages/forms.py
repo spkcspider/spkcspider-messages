@@ -22,7 +22,7 @@ from spkcspider.apps.spider.models import (
 from spkcspider.apps.spider.queryfilters import info_or
 from spkcspider.utils.security import get_hashob
 
-from .widgets import EntityListWidget, SignatureWidget
+from .widgets import SignatureWidget
 
 
 class PostBoxForm(DataContentForm):
@@ -38,14 +38,10 @@ class PostBoxForm(DataContentForm):
         ), to_field_name="id",
     )
     setattr(keys, "hashable", True)
-    webreferences = JsonField(
-        widget=EntityListWidget(), disabled=True, required=False
-    )
-    setattr(webreferences, "hashable", False)
-    setattr(
-        webreferences,
-        "view_form_field_template",
-        "spider_messages/partials/fields/view_webreferences.html"
+    webreferences = ContentMultipleChoiceField(
+        queryset=AssignedContent.objects.filter(
+            ctype__name="WebReference"
+        ), to_field_name="id", disabled=True, required=False
     )
     message_objects = ContentMultipleChoiceField(
         queryset=AssignedContent.objects.filter(
@@ -99,30 +95,27 @@ class PostBoxForm(DataContentForm):
                 usercomponent=self.instance.associated.usercomponent
             )
         if scope in {"view", "raw", "list"} and request.is_owner:
-            self.initial["webreferences"] = [
-                {
-                    "object": i,
-                    "items": {
-                        "id": i.id,
-                        "size": None,
-                        "hash_algorithm":
-                            i.content.free_data["hash_algorithm"],
-                        "sender":
-                            i.name
-                    }
-                } for i in self.instance.associated.attached_contents.filter(
+            self.initial["webreferences"] = \
+                self.instance.associated.attached_contents.filter(
                     ctype__name="WebReference"
                 )
-            ]
-            self.fields["message_objects"].queryset = \
-                self.fields["message_objects"].queryset.filter(
-                    attached_to_content=self.instance.associated
+            self.initial["message_objects"] = \
+                self.instance.associated.attached_contents.filter(
+                    ctype__name="MessageContent"
                 )
             keyhashes = request.POST.getlist("keyhash")
             if self.data.get("view_all", "") != "true" and keyhashes:
-                self.fields["message_objects"].queryset = \
-                    self.fields["message_objects"].queryset.filter(
+                self.initial["message_objects"] = \
+                    self.initial["message_objects"].filter(
                         info_or(pubkeyhash=keyhashes, hash=keyhashes)
+                    )
+            if scope != "view":
+                self.initial["webreferences"] = \
+                    self.initial["webreferences"].values_list("id", flat=True)
+
+                self.initial["message_objects"] = \
+                    self.initial["message_objects"].values_list(
+                        "id", flat=True
                     )
         else:
             del self.fields["webreferences"]
@@ -158,9 +151,9 @@ class PostBoxForm(DataContentForm):
                     "signature": x.data["signature"]
                 } for x in signatures.all()
             ]
-            return
-        del self.fields["attestation"]
-        del self.fields["signatures"]
+        else:
+            del self.fields["attestation"]
+            del self.fields["signatures"]
 
     def clean_signatures(self):
         ret = self.cleaned_data["signatures"]
@@ -224,16 +217,15 @@ class ReferenceForm(DataContentForm):
 
     create = False
 
-    free_fields = {"hash_algorithm": None}
+    free_fields = {"hash_algorithm": settings.SPIDER_HASH_ALGORITHM.name}
     quota_fields = {"url": None, "key_list": dict}
 
     def __init__(self, create=False, **kwargs):
         self.create = create
         super().__init__(**kwargs)
-        self.initial.setdefault(
-            "hash_algorithm",
-            settings.SPIDER_HASH_ALGORITHM.name
-        )
+        if not self.initial.get("hash_algorithm"):
+            self.initial["hash_algorithm"] = \
+                settings.SPIDER_HASH_ALGORITHM.name
         if not self.create:
             self.fields["hash_algorithm"].disabled = True
 
@@ -247,10 +239,12 @@ class ReferenceForm(DataContentForm):
 
     def clean(self):
         ret = super().clean()
-        if "hash_algorithm" not in self.cleaned_data:
-            ret["hash_algorithm"] = self.initial.get(
-                "hash_algorithm", settings.SPIDER_HASH_ALGORITHM.name
-            )
+        if (
+            "hash_algorithm" in self.initial and
+            not self.cleaned_data.get("hash_algorithm")
+        ):
+            self.cleaned_data["hash_algorithm"] = \
+                self.initial["hash_algorithm"]
         if isinstance(self.cleaned_data["key_list"], str):
             self.cleaned_data["key_list"] = json.loads(
                 self.cleaned_data["key_list"]
@@ -300,14 +294,20 @@ class MessageForm(DataContentForm):
     )
     fetch_url = forms.CharField(disabled=True, required=False, initial="")
     was_retrieved = forms.BooleanField(
-        disabled=True, required=False, initial=False
+        disabled=True, required=False, initial=False, help_text=_(
+            "Retrieved by recipient"
+        )
+    )
+    # by own client(s)
+    received = forms.BooleanField(
+        disabled=True, required=False, initial=False, help_text=_(
+            "Already received by own client"
+        )
     )
     key_list = JsonField(
         initial=dict, widget=forms.Textarea()
     )
     tokens = MultipleOpenChoiceField(initial=list, disabled=True)
-    # by own client(s)
-    received = forms.BooleanField(disabled=True, required=False, initial=False)
     amount_tokens = forms.IntegerField(min_value=0, initial=1, required=False)
     encrypted_content = forms.FileField()
 
@@ -318,7 +318,7 @@ class MessageForm(DataContentForm):
 
     first_run = False
 
-    free_fields = {"hash_algorithm": None}
+    free_fields = {"hash_algorithm": settings.SPIDER_HASH_ALGORITHM.name}
     quota_fields = {"fetch_url": None, "key_list": dict}
 
     def __init__(self, request, **kwargs):
@@ -371,6 +371,8 @@ class MessageForm(DataContentForm):
                     self.instance.asspciated.smarttags.filter(
                         name="received"
                     ).filter(keyhashes_q).count() == len(keyhashes)
+            else:
+                del self.fields["received"]
             del self.fields["amount_tokens"]
             self.first_run = False
         else:
@@ -378,12 +380,54 @@ class MessageForm(DataContentForm):
             del self.fields["was_retrieved"]
             del self.fields["received"]
             del self.fields["tokens"]
-            self.initial.setdefault(
-                "hash_algorithm",
-                settings.SPIDER_HASH_ALGORITHM.name
-            )
+
+            if not self.initial.get("hash_algorithm"):
+                self.initial["hash_algorithm"] = \
+                    settings.SPIDER_HASH_ALGORITHM.name
             self.initial["was_retrieved"] = False
             self.first_run = True
+
+    def clean_hash_algorithm(self):
+        ret = self.cleaned_data["hash_algorithm"]
+        if ret and not hasattr(hashes, ret.upper()):
+            raise forms.ValidationError(
+                _("invalid hash algorithm")
+            )
+        return ret
+
+    def clean(self):
+        super().clean()
+        if (
+            "hash_algorithm" in self.initial and
+            not self.cleaned_data.get("hash_algorithm")
+        ):
+            self.cleaned_data["hash_algorithm"] = \
+                self.initial["hash_algorithm"]
+        if self.first_run:
+            postbox = \
+                self.instance.associated.usercomponent.contents.filter(
+                    ctype__name="PostBox"
+                ).first()
+            if postbox:
+                self.instance.associated.attached_to_content = postbox
+            else:
+                self.add_error(None, forms.ValidationError(
+                    _("This usercomponent has no Postbox")
+                ))
+        return self.cleaned_data
+
+    def is_valid(self):
+        # cannot update retrieved message
+        if (
+            self.initial["was_retrieved"] and
+            (
+                "encrypted_content" in self.changed_data or
+                "key_list" in self.changed_data
+            )
+        ):
+            return False
+
+        return super().is_valid()
 
     def get_prepared_attachements(self):
         ret = {}
@@ -461,42 +505,3 @@ class MessageForm(DataContentForm):
             f.file = self.cleaned_data["encrypted_content"]
             ret["attachedfiles"] = [f]
         return ret
-
-    def clean_hash_algorithm(self):
-        ret = self.cleaned_data["hash_algorithm"]
-        if ret and not hasattr(hashes, ret.upper()):
-            raise forms.ValidationError(
-                _("invalid hash algorithm")
-            )
-        return ret
-
-    def clean(self):
-        super().clean()
-        if "hash_algorithm" in self.initial:
-            self.cleaned_data["hash_algorithm"] = \
-                self.initial["hash_algorithm"]
-        if self.first_run:
-            postbox = \
-                self.instance.associated.usercomponent.contents.filter(
-                    ctype__name="PostBox"
-                ).first()
-            if postbox:
-                self.instance.associated.attached_to_content = postbox
-            else:
-                self.add_error(None, forms.ValidationError(
-                    _("This usercomponent has no Postbox")
-                ))
-        return self.cleaned_data
-
-    def is_valid(self):
-        # cannot update retrieved message
-        if (
-            self.initial["was_retrieved"] and
-            (
-                "encrypted_content" in self.changed_data or
-                "key_list" in self.changed_data
-            )
-        ):
-            return False
-
-        return super().is_valid()

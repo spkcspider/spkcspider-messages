@@ -3,6 +3,7 @@ __all__ = [
 ]
 import json
 import logging
+from itertools import chain
 
 import requests
 from django.conf import settings
@@ -54,12 +55,9 @@ class PostBox(DataContent):
     #    ]
 
     def map_data(self, name, field, data, graph, context):
-        if name == "webreferences":
-            ret = literalize(data["object"], domain_base=context["hostpart"])
-            return ret
-        elif name == "signatures":
-            # per node create a signature Entity
+        if name == "signatures":
             ret = literalize(data["key"], domain_base=context["hostpart"])
+            # per node create a signature Entity
             value_node = add_property(
                 graph, "signature", ref=ret,
                 literal=literalize(
@@ -96,10 +94,15 @@ class PostBox(DataContent):
         from .forms import PostBoxForm as f
         return f
 
+    def get_references(self):
+        return chain(
+            super().get_references(),
+            self.associated.attached_contents.all()
+        )
+
     def get_abilities(self, context):
-        if context["request"].is_owner:
-            return {"push_webref", "get_webref", "del_webref"}
         if (
+            context["request"].is_owner or
             not self.free_data["only_persistent"] or
             context["request"].auth_token.persist >= 0
         ):
@@ -133,26 +136,6 @@ class PostBox(DataContent):
             form.save()
             return HttpResponse(status=201)
         return HttpResponse(status=400)
-
-    @csrf_exempt
-    def access_get_webref(self, **kwargs):
-        ref = self.associated.attached_contents.filter(
-            id=kwargs["request"].GET.get("reference")
-        ).first()
-        if not ref:
-            return HttpResponse(status=410)
-        return ref.access_message(kwargs)
-
-    @csrf_exempt
-    def access_del_webref(self, **kwargs):
-        ret = self.associated.attached_contents.filter(
-            id__in=kwargs["request"].POST.get("reference")
-        )
-        # maybe use csrftoken later
-        if not ret.exists():
-            return HttpResponse(status=410)
-        ret.delete()
-        return HttpResponse(status=200)
 
 
 @add_by_field(registry.contents, "_meta.model_name")
@@ -210,7 +193,13 @@ class WebReference(DataContent):
         from .forms import ReferenceForm
         return ReferenceForm
 
+    def get_abilities(self, context):
+        if context["request"].is_owner:
+            return {"message"}
+        return set()
+
     def access_redirect(self, kwargs):
+        # dead code for now
         ret = HttpResponsePermanentRedirect(
             redirect_to=self.url
         )
@@ -234,7 +223,7 @@ class WebReference(DataContent):
         ).delete()
         return ret
 
-    def access_message(self, kwargs):
+    def access_message(self, **kwargs):
         cached_content = self.associated.attachedfiles.filter(
             name="cache"
         ).first()

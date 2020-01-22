@@ -100,6 +100,20 @@ def replace_action(url, action):
     )
 
 
+def get_pages(graph):
+    tmp = list(graph.query(
+        """
+            SELECT ?pages
+            WHERE {
+                ?base spkc:pages.num_pages ?pages .
+            }
+        """,
+        initNs={"spkc": spkcgraph}
+    ))
+    pages = tmp[0][0].toPython()
+    return pages
+
+
 def analyze_src(graph):
     component_uriref = graph.value(
         predicate=spkcgraph["create:name"], object=Literal(
@@ -180,14 +194,12 @@ def analyse_dest(graph):
     return postbox_uriref, webref_url, domain_keys, hash_algo
 
 
-def action_send(argv, priv_key, pub_key_hash, session, response, src_keys):
-    g_src = Graph()
-    g_src.parse(data=response.content, format="turtle")
+def action_send(argv, priv_key, pub_key_hash, src_keys, session, g_src):
     component_uriref, src_options = analyze_src(g_src)
     if not component_uriref:
         parser.exit(1, "Source cannot create messages, logged in?")
 
-    dest_url = merge_get_url(argv.dest, raw="embed", info="_type=PostBox")
+    dest_url = merge_get_url(argv.dest, raw="embed", search="_type=PostBox")
     response_dest = session.get(dest_url)
     if not response_dest.ok:
         logger.info("Dest returned error: %s", response_dest.text)
@@ -195,6 +207,15 @@ def action_send(argv, priv_key, pub_key_hash, session, response, src_keys):
     dest = {}
     g_dest = Graph()
     g_dest.parse(data=response_dest.content, format="turtle")
+    pages = get_pages(g_dest)
+    for page in range(2, pages+1):
+        with session.get(
+            merge_get_url(dest_url, page=page), headers={
+                "X-TOKEN": argv.token
+            }
+        ) as response:
+            response.raise_for_status()
+            g_dest.parse(data=response.content, format="turtle")
     dest_postbox_url, webref_url, dest, dest_hash_algo = analyse_dest(g_dest)
 
     bdomain = dest_postbox_url.split("?", 1)[0]
@@ -347,7 +368,7 @@ def action_send(argv, priv_key, pub_key_hash, session, response, src_keys):
     # extract url
     response_dest = session.post(
         webref_url, data={
-            "url": merge_get_url(fetch_url, token=str(tokens[0])),
+            "url": merge_get_url(fetch_url[0], token=str(tokens[0])),
             "rtype": ReferenceType.message,
             "key_list": json.dumps(dest_key_list)
         }
@@ -355,25 +376,25 @@ def action_send(argv, priv_key, pub_key_hash, session, response, src_keys):
     response_dest.raise_for_status()
 
 
-def action_view(argv, priv_key, pem_public, session, response):
-    g_message = Graph()
-    g_message.parse(data=response.content, format="turtle")
+def action_view(argv, priv_key, pem_public, own_url, session, g_message):
     if argv.message_id is not None:
         assert isinstance(argv.message_id, int)
-        tmp = list(g_message.query(
+        result = list(map(g_message.query(
             """
-                SELECT DISTINCT ?value
+                SELECT DISTINCT ?webreference ?hash_algorithm
                 WHERE {
-                    ?base a spkc:Content .
-                    ?base spkc:properties ?propalg , ?propid .
+                    ?webreference a spkc:Content .
+                    ?webreference spkc:type ?type .
+                    ?webreference spkc:properties ?propalg , ?propid .
                     ?propid spkc:name ?idname ;
                             spkc:value ?idvalue .
                     ?propalg spkc:name ?algname ;
-                             spkc:value ?value .
+                                spkc:value ?hash_algorithm .
                 }
             """,
             initNs={"spkc": spkcgraph},
             initBindings={
+                "type":  Literal("WebReference", datatype=XSD.string),
                 "idvalue": Literal(argv.message_id),
                 "algname": Literal(
                     "hash_algorithm", datatype=XSD.string
@@ -383,9 +404,11 @@ def action_view(argv, priv_key, pem_public, session, response):
                 ),
 
             }
-        ))
+        )))
+        if not result:
+            parser.exit(0, "message not found\n")
         pub_key_hasher = getattr(
-            hashes, tmp[0].upper()
+            hashes, result[0].hash_algorithm.upper()
         )()
 
         digest = hashes.Hash(argv.src_hash_algo, backend=default_backend())
@@ -394,24 +417,20 @@ def action_view(argv, priv_key, pem_public, session, response):
             pub_key_hasher.name,
             digest.finalize().hex()
         )
-        postbox_url = g_message.value(
-            predicate=spkcgraph["type"],
-            object=Literal("PostBox", datatype=XSD.string)
-        )
-        getref_url = merge_get_url(
+        webref_url = merge_get_url(
             replace_action(
-                postbox_url, "get_webref/"
-            ), reference=argv.message_id
+                result[0].webreference, "message/"
+            )
         )
         if argv.action == "peek":
             response = session.get(
-                getref_url, headers={
+                webref_url, headers={
                     "X-TOKEN": argv.token
                 }
             )
         else:
             response = session.post(
-                getref_url, headers={
+                webref_url, headers={
                     "X-TOKEN": argv.token
                 }, data={
                     "keyhash": pub_key_hashalg
@@ -438,44 +457,45 @@ def action_view(argv, priv_key, pem_public, session, response):
         headers, content = blob.split(b"\n\n", 1)
         argv.file.write(content)
     else:
+        # retrieve further pages
         queried = {}
         for i in g_message.query(
             """
-                SELECT DISTINCT ?base ?message_name ?message_value
-                WHERE {
-                    ?property spkc:name ?search_name .
-                    ?property spkc:value ?base .
-                    ?base spkc:properties ?message_base_prop .
-                    ?message_base_prop spkc:name ?message_name .
-                    ?message_base_prop spkc:value ?message_value .
-                }
-            """,
+            SELECT DISTINCT ?webreference ?idvalue ?namevalue
+            WHERE {
+                ?webreference a spkc:Content .
+                ?webreference spkc:type ?type .
+                ?webreference spkc:properties ?propalg , ?propid .
+                ?propid spkc:name ?idname ;
+                        spkc:value ?idvalue .
+                ?propid spkc:name ?namename ;
+                        spkc:value ?namevalue .
+            }
+        """,
             initNs={"spkc": spkcgraph},
             initBindings={
-                "search_name": Literal(
-                    "webreferences", datatype=XSD.string
-                )
+                "type":  Literal("WebReference", datatype=XSD.string),
+                "idvalue": Literal(argv.message_id),
+                "idname": Literal(
+                    "id", datatype=XSD.string
+                ),
+                "namename": Literal(
+                    "name", datatype=XSD.string
+                ),
+
             }
         ):
-            queried.setdefault(str(i.base), {})
-            queried[str(i.base)][str(i.message_name)] = i.message_value
-        if len(queried) == 0 and not g_message.value(
-            predicate=spkcgraph["name"],
-            object=Literal(
-                "webreferences", datatype=XSD.string
-            )
-        ):
-            parser.exit(1, "message references not found; logged in?\n")
+            queried.setdefault(str(i.webreference), {})
+            queried[str(i.webreference)]["id"] = i.idvalue
+            queried[str(i.webreference)]["name"] = i.namevalue
         print("Messages:")
         for i in sorted(queried.values(), key=lambda x: x["id"]):
             print(i["id"], i["name"])
 
 
-def action_check(argv, priv_key, pub_key_hash, session, response):
+def action_check(argv, priv_key, pub_key_hash, session, g):
     src = {}
 
-    g = Graph()
-    g.parse(data=response.content, format="turtle")
     postbox = None
 
     for i in g.query(
@@ -633,7 +653,7 @@ def main(argv):
             )
         elif access == "list":
             own_url = merge_get_url(
-                argv.url, raw="embed", info="_type=PostBox"
+                argv.url, raw="embed", search="_type=PostBox"
             )
         else:
             own_url = merge_get_url(argv.url, raw="embed")
@@ -647,19 +667,28 @@ def main(argv):
 
         g = Graph()
         g.parse(data=response.content, format="turtle")
+        pages = get_pages(g)
+        for page in range(2, pages+1):
+            with s.get(
+                merge_get_url(own_url, page=page), headers={
+                    "X-TOKEN": argv.token
+                }
+            ) as response:
+                response.raise_for_status()
+                g.parse(data=response.content, format="turtle")
         src = {}
 
         for i in g.query(
             """
                 SELECT
-                ?postbox ?postbox_value ?postbox_value ?key_name ?key_value
+                ?postbox ?postbox_value ?key_name ?key_value
                 WHERE {
                     ?postbox spkc:properties ?property .
-                    ?property spkc:name ?postbox_name .
-                    ?property spkc:value ?postbox_value .
+                    ?property spkc:name ?postbox_name ;
+                              spkc:value ?postbox_value .
                     ?postbox_value spkc:properties ?key_base_prop .
-                    ?key_base_prop spkc:name ?key_name .
-                    ?key_base_prop spkc:value ?key_value .
+                    ?key_base_prop spkc:name ?key_name ;
+                                   spkc:value ?key_value .
                 }
             """,
             initNs={"spkc": spkcgraph},
@@ -708,12 +737,12 @@ def main(argv):
 
         if argv.action == "send":
             return action_send(
-                argv, priv_key, pub_key_hash, s, response, src_keys
+                argv, priv_key, pub_key_hash, src_keys, s, g
             )
         elif argv.action in {"view", "peek"}:
-            return action_view(argv, priv_key, pem_public, s, response)
+            return action_view(argv, priv_key, pem_public, own_url, s, g)
         elif argv.action == "check":
-            ret = action_check(argv, priv_key, pub_key_hash, s, response)
+            ret = action_check(argv, priv_key, pub_key_hash, s, g)
             if ret is not True:
                 parser.exit(2, "check failed: %s\n" % ret)
             print("check successful")
