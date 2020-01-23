@@ -19,8 +19,9 @@ from rdflib import XSD, Literal
 from spkcspider.apps.spider import registry
 from spkcspider.apps.spider.conf import get_requests_params
 from spkcspider.apps.spider.models import (
-    AssignedContent, AttachedFile, DataContent, ContentVariant
+    AssignedContent, AttachedFile, ContentVariant, DataContent
 )
+from spkcspider.apps.spider.queryfilters import info_or
 from spkcspider.constants import VariantType, spkcgraph
 from spkcspider.utils.fields import add_by_field, add_property, literalize
 from spkcspider.utils.urls import merge_get_url
@@ -181,8 +182,8 @@ class WebReference(DataContent):
 
     def get_content_name(self):
         url = self.quota_data["url"].split("?", 1)[0]
-        if len(url) > 30:
-            url = f"{url[:30]}..."
+        if len(url) > 70:
+            url = f"{url[:70]}..."
         return "{}{}: {}?...".format(
             self.localize_name(self.associated.ctype.name),
             self.associated_id,
@@ -223,22 +224,24 @@ class WebReference(DataContent):
         ).delete()
         return ret
 
+    @csrf_exempt
     def access_message(self, **kwargs):
         cached_content = self.associated.attachedfiles.filter(
             name="cache"
         ).first()
         if not cached_content:
             cached_content = AttachedFile(
-                content=self,
+                content=self.associated,
                 unique=True,
                 name="cache"
             )
-            params, inline_domain = get_requests_params(self.url)
+            params, inline_domain = get_requests_params(self.quota_data["url"])
             fp = None
             if inline_domain:
                 try:
                     resp = Client().get(
-                        self.url, follow=True, secure=True, Connection="close",
+                        self.quota_data["url"], follow=True, secure=True,
+                        Connection="close",
                         Referer=merge_get_url(
                             "%s%s" % (
                                 kwargs["hostpart"],
@@ -268,6 +271,10 @@ class WebReference(DataContent):
                             "Too big/not specified", status=413
                         )
                     written_size = 0
+                    fp = NamedTemporaryFile(
+                        suffix='.upload',
+                        dir=settings.FILE_UPLOAD_TEMP_DIR
+                    )
                     for chunk in resp:
                         written_size += fp.write(chunk)
                     self.update_used_space(written_size)
@@ -282,7 +289,7 @@ class WebReference(DataContent):
             else:
                 try:
                     with requests.get(
-                        self.url,
+                        self.quota_data["url"],
                         headers={
                             "Referer": merge_get_url(
                                 "%s%s" % (
@@ -380,6 +387,11 @@ class MessageContent(DataContent):
     def get_priority(self):
         return -10
 
+    def get_abilities(self, context):
+        if context["request"].is_owner:
+            return {"message"}
+        return set()
+
     def get_info(self):
         ret = super().get_info(unlisted=True)
 
@@ -401,7 +413,7 @@ class MessageContent(DataContent):
 
     def map_data(self, name, field, data, graph, context):
         if name == "encrypted_content":
-            url = self.associated.get_absolute_url("download")
+            url = self.associated.get_absolute_url("message")
             url = "{}{}?{}".format(
                 context["hostpart"], url, context["context"]["sanitized_GET"]
             )
@@ -410,12 +422,19 @@ class MessageContent(DataContent):
         return super().map_data(name, field, data, graph, context)
 
     @csrf_exempt
-    def access_download(self, **kwargs):
+    def access_message(self, **kwargs):
+        f = self.associated.attachedfiles.get(
+            name="encrypted_content"
+        )
         ret = CbFileResponse(
-            self.cached_content
+            f.file.open()
         )
-        ret.msgcopies = self.copies.filter(
-            keyhash__in=kwargs["request"].POST.getlist("keyhash")
+        keyhashes = kwargs["request"].POST.getlist("keyhash")
+        keyhashes_q = info_or(
+            pubkeyhash=keyhashes,
+            hash=keyhashes,
+            info_fieldname="target__info"
         )
-        ret["X-KEYLIST"] = json.dumps(self.key_list)
+        ret.msgcopies = self.associated.smarttags.filter(keyhashes_q)
+        ret["X-KEYLIST"] = json.dumps(self.quota_data["key_list"])
         return ret

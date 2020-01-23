@@ -379,22 +379,21 @@ def action_send(argv, priv_key, pub_key_hash, src_keys, session, g_src):
 def action_view(argv, priv_key, pem_public, own_url, session, g_message):
     if argv.message_id is not None:
         assert isinstance(argv.message_id, int)
-        result = list(map(g_message.query(
+        result = list(g_message.query(
             """
-                SELECT DISTINCT ?webreference ?hash_algorithm
+                SELECT DISTINCT ?base ?hash_algorithm ?type
                 WHERE {
-                    ?webreference a spkc:Content .
-                    ?webreference spkc:type ?type .
-                    ?webreference spkc:properties ?propalg , ?propid .
+                    ?base a <https://spkcspider.net/static/schemes/spkcgraph#spkc:Content> ;
+                                  spkc:type ?type ;
+                                  spkc:properties ?propalg , ?propid .
                     ?propid spkc:name ?idname ;
                             spkc:value ?idvalue .
                     ?propalg spkc:name ?algname ;
-                                spkc:value ?hash_algorithm .
+                             spkc:value ?hash_algorithm .
                 }
-            """,
+            """,  # noqa E501
             initNs={"spkc": spkcgraph},
             initBindings={
-                "type":  Literal("WebReference", datatype=XSD.string),
                 "idvalue": Literal(argv.message_id),
                 "algname": Literal(
                     "hash_algorithm", datatype=XSD.string
@@ -404,33 +403,35 @@ def action_view(argv, priv_key, pem_public, own_url, session, g_message):
                 ),
 
             }
-        )))
-        if not result:
+        ))
+        if not result or result[0].type.toPython() not in {
+            "WebReference", "MessageContent"
+        }:
             parser.exit(0, "message not found\n")
         pub_key_hasher = getattr(
             hashes, result[0].hash_algorithm.upper()
         )()
 
-        digest = hashes.Hash(argv.src_hash_algo, backend=default_backend())
+        digest = hashes.Hash(pub_key_hasher, backend=default_backend())
         digest.update(pem_public)
-        pub_key_hashalg = "%s%s" % (
+        pub_key_hashalg = "%s=%s" % (
             pub_key_hasher.name,
             digest.finalize().hex()
         )
-        webref_url = merge_get_url(
+        retrieve_url = merge_get_url(
             replace_action(
-                result[0].webreference, "message/"
+                result[0].base, "message/"
             )
         )
         if argv.action == "peek":
             response = session.get(
-                webref_url, headers={
+                retrieve_url, headers={
                     "X-TOKEN": argv.token
                 }
             )
         else:
             response = session.post(
-                webref_url, headers={
+                retrieve_url, headers={
                     "X-TOKEN": argv.token
                 }, data={
                     "keyhash": pub_key_hashalg
@@ -438,7 +439,7 @@ def action_view(argv, priv_key, pem_public, own_url, session, g_message):
             )
         if not response.ok:
             logger.info("Message retrieval failed: %s", response.text)
-            parser.exit(0, "message not found\n")
+            parser.exit(0, "message could not be fetched\n")
         key_list = json.loads(response.headers["X-KEYLIST"])
         key = key_list.get(pub_key_hashalg, None)
         if not key:
@@ -457,25 +458,23 @@ def action_view(argv, priv_key, pem_public, own_url, session, g_message):
         headers, content = blob.split(b"\n\n", 1)
         argv.file.write(content)
     else:
-        # retrieve further pages
-        queried = {}
+        queried_webrefs = {}
+        queried_messages = {}
         for i in g_message.query(
             """
-            SELECT DISTINCT ?webreference ?idvalue ?namevalue
+            SELECT DISTINCT ?base ?idvalue ?namevalue ?type
             WHERE {
-                ?webreference a spkc:Content .
-                ?webreference spkc:type ?type .
-                ?webreference spkc:properties ?propalg , ?propid .
+                ?base a <https://spkcspider.net/static/schemes/spkcgraph#spkc:Content> ;
+                   spkc:type ?type ;
+                   spkc:properties ?propalg , ?propid .
                 ?propid spkc:name ?idname ;
                         spkc:value ?idvalue .
-                ?propid spkc:name ?namename ;
+                ?propalg spkc:name ?namename ;
                         spkc:value ?namevalue .
             }
-        """,
+        """,  # noqa E501
             initNs={"spkc": spkcgraph},
             initBindings={
-                "type":  Literal("WebReference", datatype=XSD.string),
-                "idvalue": Literal(argv.message_id),
                 "idname": Literal(
                     "id", datatype=XSD.string
                 ),
@@ -485,11 +484,21 @@ def action_view(argv, priv_key, pem_public, own_url, session, g_message):
 
             }
         ):
-            queried.setdefault(str(i.webreference), {})
-            queried[str(i.webreference)]["id"] = i.idvalue
-            queried[str(i.webreference)]["name"] = i.namevalue
-        print("Messages:")
-        for i in sorted(queried.values(), key=lambda x: x["id"]):
+            if i.type.toPython() == "WebReference":
+                queried = queried_webrefs
+            elif i.type.toPython() == "MessageContent":
+                queried = queried_messages
+            else:
+                continue
+            queried.setdefault(str(i.base), {})
+            queried[str(i.base)]["id"] = i.idvalue
+            queried[str(i.base)]["name"] = i.namevalue
+        print("Received Messages:")
+        for i in sorted(queried_webrefs.values(), key=lambda x: x["id"]):
+            print(i["id"], i["name"])
+
+        print("Own Messages:")
+        for i in sorted(queried_messages.values(), key=lambda x: x["id"]):
             print(i["id"], i["name"])
 
 

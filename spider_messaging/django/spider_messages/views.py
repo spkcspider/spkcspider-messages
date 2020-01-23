@@ -18,12 +18,14 @@ class MessageContentView(UserTestMixin, View):
     model = MessageContent
     token = None
 
+    def dispatch_extra(self, request, *args, **kwargs):
+        self.object = self.get_object()
+        self.usercomponent = self.object.usercomponent
+        return None
+
     @method_decorator(csrf_exempt)
     def dispatch(self, request, *args, **kwargs):
         try:
-            obj = self.get_object()
-            self.usercomponent = obj.usercomponent
-            self.object = obj.content
             return super().dispatch(request, *args, **kwargs)
         except Http404:
             return get_settings_func(
@@ -50,14 +52,17 @@ class MessageContentView(UserTestMixin, View):
         return self.receivers.exists()
 
     def get(self, request, *args, **kwargs):
+        f = self.object.attachedfiles.get(
+            name="encrypted_content"
+        )
         ret = CbFileResponse(
-            self.object.encrypted_content.open()
+            f.file.open()
         )
         # cached, needs only content-length
         # don't add key-list; it is just for own keys
         # owner should access message objects via access_view
-        ret["content-length"] = self.object.encrypted_content.size
-        ret.msgcopies = self.object.associated.smarttags.filter(
+        ret["content-length"] = f.file.size
+        ret.msgcopies = self.object.smarttags.filter(
             name="unread", target=None
         )
         ret.msgreceivers = self.receivers
