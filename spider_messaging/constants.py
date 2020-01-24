@@ -1,4 +1,4 @@
-__all__ = ("ReferenceType", "AttestationResult", "DomainInfo", "KeyTriple")
+__all__ = ("AttestationResult", "DomainInfo", "KeyTriple", "MessageType")
 
 from collections import namedtuple
 import enum
@@ -22,27 +22,20 @@ class AttestationResult(enum.IntEnum):
     error = 3
 
 
-class ReferenceType(str, enum.Enum):
-    # unencrypted redirect
-    redirect = "a"
-    # message object
-    message = "b"
-    # rdf file with proposed content(s)
-    content = "c"
-
-    def __str__(self):
-        # output value instead of member name
-        return self.value
-
-
 class MessageType(str, enum.Enum):
     # encrypted redirect
     redirect = "redirect"
     # message object
     message = "message"
+    # email object (html, more powerful)
+    email = "email"
     # file object
     file = "file"
 
     def __str__(self):
         # output value instead of member name
         return self.value
+
+    def __bytes__(self):
+        # for headers
+        return self.value.encode("ascii")

@@ -6,6 +6,7 @@ import argparse
 import logging
 import base64
 import json
+from email import policy, parser as emailparser
 # import re
 
 import requests
@@ -19,7 +20,7 @@ from rdflib import Graph, XSD, Literal
 from spkcspider.utils.urls import merge_get_url
 from spkcspider.constants import static_token_matcher, spkcgraph
 
-from spider_messaging.constants import ReferenceType, AttestationResult
+from spider_messaging.constants import AttestationResult, MessageType
 from spider_messaging.attestation import (
     AttestationChecker
 )
@@ -287,7 +288,7 @@ def action_send(argv, priv_key, pub_key_hash, src_keys, session, g_src):
             "%s=%s" % (dest_hash_algo.name, k[0].hex())
         ] = base64.urlsafe_b64encode(enc).decode("ascii")
     ctx = AESGCM(aes_key)
-    headers = b"SPKC-Type: message\n"
+    headers = b"SPKC-Type: %b\n" % MessageType.file
     blob = ctx.encrypt(
         nonce, b"%b\n%b" % (
             headers,
@@ -369,7 +370,6 @@ def action_send(argv, priv_key, pub_key_hash, src_keys, session, g_src):
     response_dest = session.post(
         webref_url, data={
             "url": merge_get_url(fetch_url[0], token=str(tokens[0])),
-            "rtype": ReferenceType.message,
             "key_list": json.dumps(dest_key_list)
         }
     )
@@ -452,11 +452,20 @@ def action_view(argv, priv_key, pem_public, own_url, session, g_message):
                 label=None
             )
         )
+        # TODO: optimize, use streaming
         ctx = AESGCM(decrypted_key)
+        # TODO: use better algorithm than split, move NONCE in header?
         nonce, content = response.content.split(b"\0", 1)
         blob = ctx.decrypt(nonce, content, None)
-        headers, content = blob.split(b"\n\n", 1)
-        argv.file.write(content)
+        eparser = emailparser.BytesParser(policy=policy.default)
+        headers = eparser.parsebytes(blob, headersonly=True)
+        t = headers.get("SPKC-Type", MessageType.email)
+        if t == MessageType.email:
+            argv.file.write(blob)
+        else:
+            # TODO: use better algorithm than split
+            headers, content = blob.split(b"\n\n", 1)
+            argv.file.write(content)
     else:
         queried_webrefs = {}
         queried_messages = {}
