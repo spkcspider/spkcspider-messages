@@ -150,7 +150,7 @@ class WebReference(DataContent):
         {
             "name": "WebReference",
             "ctype": (
-                VariantType.unlisted + VariantType.unique
+                VariantType.unlisted
             ),
             "strength": 0
         },

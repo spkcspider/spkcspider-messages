@@ -5,6 +5,7 @@ import argparse
 import logging
 import base64
 import json
+import io
 from email import policy, parser as emailparser
 # import re
 
@@ -88,6 +89,39 @@ send_parser.add_argument(
 send_parser.add_argument(
     'dest', action="store", help='Destination url'
 )
+
+
+class EncryptedFile(io.RawIOBase):
+    iterob = None
+    _left = b""
+
+    def __init__(self, fencryptor, nonce, fileob, headers="\n"):
+        self.iterob = self.init_iter(fencryptor, nonce, fileob, headers)
+
+    @staticmethod
+    def init_iter(fencryptor, nonce, fileob, headers):
+        yield b"%b\0" % nonce
+        yield fencryptor.update(b"%b\n" % headers)
+        for chunk in fileob.read(512):
+            if not isinstance(chunk, bytes):
+                chunk = bytes([chunk])
+            assert isinstance(chunk, bytes)
+            yield fencryptor.update(chunk)
+        yield fencryptor.finalize()
+
+    def read(self, size=-1):
+        if size == -1:
+            return b"".join(self.iterob)
+        elif size < len(self._left):
+            ret, self._left = self._left[:size], self._left[size:]
+            return ret
+        else:
+            for chunk in self.iterob:
+                self._left += chunk
+                if len(self._left) >= size:
+                    break
+            ret, self._left = self._left[:size], self._left[size:]
+            return ret
 
 
 def replace_action(url, action):
@@ -296,12 +330,6 @@ def action_send(argv, priv_key, pub_key_hash, src_keys, session, g_src):
         ] = base64.urlsafe_b64encode(enc).decode("ascii")
     headers = b"SPKC-Type: %b\n" % MessageType.file
 
-    def iter_encrypt():
-        yield b"%b\0" % nonce
-        yield fencryptor.update(b"%b\n" % headers)
-        for chunk in argv.file.read(512):
-            yield fencryptor.update(chunk)
-        yield fencryptor.finalize()
     # remove raw as we parse html
     message_create_url = merge_get_url(
         replace_action(str(component_uriref), "add/MessageContent/"), raw=None
@@ -328,7 +356,9 @@ def action_send(argv, priv_key, pub_key_hash, src_keys, session, g_src):
             "X-TOKEN": argv.token  # only for src
         },
         files={
-            "encrypted_content": iter_encrypt
+            "encrypted_content": EncryptedFile(
+                fencryptor, nonce, argv.file, headers
+            )
         }
     )
     if not response.ok or message_create_url == response.url:
@@ -482,10 +512,10 @@ def action_view(argv, priv_key, pem_public, own_url, session, g_message):
                 headblock = chunk[-16:]
             if blob is not None:
                 if not headers:
-                    if b"\0\0" not in blob:
+                    if b"\n\n" not in blob:
                         eparser.feed(blob)
                         continue
-                    headersrest, blob = blob.split(b"\0\0")
+                    headersrest, blob = blob.split(b"\n\n")
                     eparser.feed(headersrest)
                     headers = eparser.close()
                     # check  what to do
@@ -496,20 +526,22 @@ def action_view(argv, priv_key, pem_public, own_url, session, g_message):
                             policy=policy.SMTP
                         ))
             argv.file.write(blob)
+        argv.file.write(fdecryptor.finalize_with_tag(headblock))
     else:
         queried_webrefs = {}
         queried_messages = {}
+        g_message.serialize(destination='output.txt', format='turtle')
         for i in g_message.query(
             """
             SELECT DISTINCT ?base ?idvalue ?namevalue ?type
             WHERE {
                 ?base a <https://spkcspider.net/static/schemes/spkcgraph#spkc:Content> ;
                    spkc:type ?type ;
-                   spkc:properties ?propalg , ?propid .
+                   spkc:properties ?propname , ?propid .
                 ?propid spkc:name ?idname ;
                         spkc:value ?idvalue .
-                ?propalg spkc:name ?namename ;
-                        spkc:value ?namevalue .
+                ?propname spkc:name ?namename ;
+                          spkc:value ?namevalue .
             }
         """,  # noqa E501
             initNs={"spkc": spkcgraph},

@@ -275,6 +275,9 @@ class ReferenceForm(DataContentForm):
     def get_prepared_attachements(self):
         ret = {}
         if self.create:
+            # update own references to add webrerence
+            #   without updating PostBox
+            ret["referenced_by"] = self.instance.associated.attached_to_content
             ret["smarttags"] = [
                 SmartTag(
                     content=self.instance.associated,
@@ -476,6 +479,9 @@ class MessageForm(DataContentForm):
                     smartkey.name = "received"
         # don't allow new tokens after the first run
         if self.first_run:
+            # update own references to add messagecontent
+            #   without updating PostBox
+            ret["referenced_by"] = self.instance.associated.attached_to_content
             ret["attachedtokens"] = [
                 AuthToken(
                     persist=0,
