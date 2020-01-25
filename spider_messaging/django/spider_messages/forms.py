@@ -205,7 +205,7 @@ class PostBoxForm(DataContentForm):
 
 
 class ReferenceForm(DataContentForm):
-    url = forms.URLField(max_length=600)
+    url = forms.URLField(max_length=400)
     key_list = JsonField(
         widget=forms.Textarea()
     )
@@ -237,6 +237,16 @@ class ReferenceForm(DataContentForm):
             )
         return ret
 
+    def clean_key_list(self):
+        ret = self.cleaned_data["key_list"]
+        for val in ret.values():
+            # 256 bits = current maximum of AESGCM
+            if len(val) > 32:
+                raise forms.ValidationError(
+                    _("key has invalid length")
+                )
+        return ret
+
     def clean(self):
         ret = super().clean()
         if (
@@ -245,10 +255,6 @@ class ReferenceForm(DataContentForm):
         ):
             self.cleaned_data["hash_algorithm"] = \
                 self.initial["hash_algorithm"]
-        if isinstance(self.cleaned_data["key_list"], str):
-            self.cleaned_data["key_list"] = json.loads(
-                self.cleaned_data["key_list"]
-            )
         q = info_or(
             pubkeyhash=list(self.cleaned_data["key_list"].keys()),
             info_fieldname="target__info"
@@ -283,8 +289,10 @@ class ReferenceForm(DataContentForm):
                     content=self.instance.associated,
                     unique=True,
                     name="unread",
-                    target=h.target
+                    target=h.target,
+                    free=True
                 )
+                # signatures are prepared and only hold keys in key_list
                 for h in self.cleaned_data["signatures"]
             ]
         return ret

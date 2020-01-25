@@ -11,7 +11,6 @@ from email import policy, parser as emailparser
 
 import requests
 # from cryptography.x509.oid import NameOID
-from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.ciphers import (
     Cipher, algorithms, modes
@@ -102,12 +101,13 @@ class EncryptedFile(io.RawIOBase):
     def init_iter(fencryptor, nonce, fileob, headers):
         yield b"%b\0" % nonce
         yield fencryptor.update(b"%b\n" % headers)
-        for chunk in fileob.read(512):
-            if not isinstance(chunk, bytes):
-                chunk = bytes([chunk])
+        chunk = fileob.read(512)
+        while chunk:
             assert isinstance(chunk, bytes)
             yield fencryptor.update(chunk)
+            chunk = fileob.read(512)
         yield fencryptor.finalize()
+        yield fencryptor.tag
 
     def read(self, size=-1):
         if size == -1:
@@ -278,8 +278,8 @@ def action_send(argv, priv_key, pub_key_hash, src_keys, session, g_src):
         logger.critical("Dest base url contains invalid keys.")
         parser.exit(1, "dest contains invalid keys\n")
 
-    # argv.file.read()
-    aes_key = AESGCM.generate_key(bit_length=256)
+    # 256 bit
+    aes_key = os.urandom(32)
     nonce = os.urandom(13)
     fencryptor = Cipher(
         algorithms.AES(aes_key),
@@ -410,6 +410,10 @@ def action_send(argv, priv_key, pub_key_hash, src_keys, session, g_src):
     )
     response_dest.raise_for_status()
 
+    if not response_dest.ok:
+        logger.error("Sending message failed: %s", response_dest.text)
+        parser.exit(1, "Sending message failed")
+
 
 def action_view(argv, priv_key, pem_public, own_url, session, g_message):
     if argv.message_id is not None:
@@ -505,26 +509,27 @@ def action_view(argv, priv_key, pem_public, own_url, session, g_message):
                     ).decryptor()
                     blob = fdecryptor.update(headblock[:-16])
                     headblock = headblock[-16:]
+                else:
+                    continue
             else:
                 blob = fdecryptor.update(
                     b"%b%b" % (headblock, chunk[:-16])
                 )
                 headblock = chunk[-16:]
-            if blob is not None:
-                if not headers:
-                    if b"\n\n" not in blob:
-                        eparser.feed(blob)
-                        continue
-                    headersrest, blob = blob.split(b"\n\n")
-                    eparser.feed(headersrest)
-                    headers = eparser.close()
-                    # check  what to do
-                    t = headers.get("SPKC-Type", MessageType.email)
-                    if t == MessageType.email:
-                        argv.file.write(headers.as_bytes(
-                            unixfrom=True,
-                            policy=policy.SMTP
-                        ))
+            if not headers:
+                if b"\n\n" not in blob:
+                    eparser.feed(blob)
+                    continue
+                headersrest, blob = blob.split(b"\n\n", 1)
+                eparser.feed(headersrest)
+                headers = eparser.close()
+                # check  what to do
+                t = headers.get("SPKC-Type", MessageType.email)
+                if t == MessageType.email:
+                    argv.file.write(headers.as_bytes(
+                        unixfrom=True,
+                        policy=policy.SMTP
+                    ))
             argv.file.write(blob)
         argv.file.write(fdecryptor.finalize_with_tag(headblock))
     else:
@@ -630,31 +635,45 @@ def action_check(argv, priv_key, pub_key_hash, session, g):
     if base64.urlsafe_b64decode(tmp[0][0].value) != src_activator_value:
         return "activator doesn't match shown activator"
     if errored:
-        if argv.fix:
-            pub_key_hash_bin = bytes.fromhex(pub_key_hash)
-            can_fix = list(filter(lambda x: x[0] == pub_key_hash_bin, errored))
-            csrftoken = list(g.objects(predicate=spkcgraph["csrftoken"]))[0]
+        pub_key_hash_bin = bytes.fromhex(pub_key_hash)
+        can_fix = list(filter(lambda x: x[0] == pub_key_hash_bin, errored))
+        if not argv.fix:
+            if can_fix and postbox:
+                print("Can fix signature")
+        else:
             if not can_fix or not postbox:
                 return ", ".join(map(lambda x: x[0].hex(), errored))
 
             postbox_update = replace_action(
                 postbox, "update/"
             )
+            # retrieve token
+            response = session.get(
+                postbox_update, headers={
+                    "X-TOKEN": argv.token
+                }
+            )
+            g_token = Graph()
+            g_token.parse(data=response.content, format="html")
+            csrftoken = list(g_token.objects(
+                predicate=spkcgraph["csrftoken"])
+            )[0]
             finished_signatures = []
             for key in can_fix:
-                signature = key[1].sign(
-                    base64.urlsafe_b64decode(src_activator_value),
+                # currently only one priv key is supported
+                signature = priv_key.sign(
+                    src_activator_value,
                     padding.PSS(
-                        mgf=padding.MGF1(argv.hash),
+                        mgf=padding.MGF1(src_hash),
                         salt_length=padding.PSS.MAX_LENGTH
                     ),
-                    argv.hash
+                    src_hash
                 )
                 finished_signatures.append(
                     {
                         "hash": key[0].hex(),
                         "signature": "{}={}".format(
-                            src_hash,
+                            src_hash.name,
                             base64.urlsafe_b64encode(signature).decode("ascii")
                         )
                     }
@@ -662,14 +681,16 @@ def action_check(argv, priv_key, pub_key_hash, session, g):
             # update
             response = session.post(
                 postbox_update, data={
-                    "signatures": finished_signatures
+                    "signatures": json.dumps(finished_signatures)
                 }, headers={
                     "X-CSRFToken": csrftoken,
                     "X-TOKEN": argv.token
                 }
             )
             if not response.ok:
-                raise
+                logger.error("Repair failed: %s", response.text)
+                parser.exit(1, "repair failed\n")
+            logger.debug("Repair succeeded")
             if len(can_fix) == len(errored):
                 return True
         return ", ".join(map(lambda x: x[0].hex(), errored))
