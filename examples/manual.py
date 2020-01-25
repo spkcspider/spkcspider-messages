@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-import io
 import sys
 import os
 import argparse
@@ -13,6 +12,9 @@ import requests
 # from cryptography.x509.oid import NameOID
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives.ciphers import (
+    Cipher, algorithms, modes
+)
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 from rdflib import Graph, XSD, Literal
@@ -242,9 +244,14 @@ def action_send(argv, priv_key, pub_key_hash, src_keys, session, g_src):
         logger.critical("Dest base url contains invalid keys.")
         parser.exit(1, "dest contains invalid keys\n")
 
-    blob = argv.file.read()
+    # argv.file.read()
     aes_key = AESGCM.generate_key(bit_length=256)
-    nonce = os.urandom(20)
+    nonce = os.urandom(13)
+    fencryptor = Cipher(
+        algorithms.AES(aes_key),
+        modes.GCM(nonce),
+        backend=default_backend()
+    ).encryptor()
     src_key_list = {}
     dest_key_list = {}
     if argv.stealth:
@@ -287,14 +294,14 @@ def action_send(argv, priv_key, pub_key_hash, src_keys, session, g_src):
         dest_key_list[
             "%s=%s" % (dest_hash_algo.name, k[0].hex())
         ] = base64.urlsafe_b64encode(enc).decode("ascii")
-    ctx = AESGCM(aes_key)
     headers = b"SPKC-Type: %b\n" % MessageType.file
-    blob = ctx.encrypt(
-        nonce, b"%b\n%b" % (
-            headers,
-            blob
-        ), None
-    )
+
+    def iter_encrypt():
+        yield b"%b\0" % nonce
+        yield fencryptor.update(b"%b\n" % headers)
+        for chunk in argv.file.read(512):
+            yield fencryptor.update(chunk)
+        yield fencryptor.finalize()
     # remove raw as we parse html
     message_create_url = merge_get_url(
         replace_action(str(component_uriref), "add/MessageContent/"), raw=None
@@ -321,9 +328,7 @@ def action_send(argv, priv_key, pub_key_hash, src_keys, session, g_src):
             "X-TOKEN": argv.token  # only for src
         },
         files={
-            "encrypted_content": io.BytesIO(
-                b"%b\0%b" % (nonce, blob)
-            )
+            "encrypted_content": iter_encrypt
         }
     )
     if not response.ok or message_create_url == response.url:
@@ -425,13 +430,13 @@ def action_view(argv, priv_key, pem_public, own_url, session, g_message):
         )
         if argv.action == "peek":
             response = session.get(
-                retrieve_url, headers={
+                retrieve_url, stream=True, headers={
                     "X-TOKEN": argv.token
                 }
             )
         else:
             response = session.post(
-                retrieve_url, headers={
+                retrieve_url, stream=True, headers={
                     "X-TOKEN": argv.token
                 }, data={
                     "keyhash": pub_key_hashalg
@@ -452,20 +457,45 @@ def action_view(argv, priv_key, pem_public, own_url, session, g_message):
                 label=None
             )
         )
-        # TODO: optimize, use streaming
-        ctx = AESGCM(decrypted_key)
-        # TODO: use better algorithm than split, move NONCE in header?
-        nonce, content = response.content.split(b"\0", 1)
-        blob = ctx.decrypt(nonce, content, None)
-        eparser = emailparser.BytesParser(policy=policy.default)
-        headers = eparser.parsebytes(blob, headersonly=True)
-        t = headers.get("SPKC-Type", MessageType.email)
-        if t == MessageType.email:
+
+        headblock = b""
+        fdecryptor = None
+        eparser = emailparser.BytesFeedParser(policy=policy.default)
+        headers = None
+        for chunk in response.iter_content(chunk_size=256):
+            blob = None
+            if not fdecryptor:
+                headblock = b"%b%b" % (headblock, chunk)
+                if b"\0" in headblock:
+                    nonce, headblock = headblock.split(b"\0", 1)
+                    fdecryptor = Cipher(
+                        algorithms.AES(decrypted_key),
+                        modes.GCM(nonce),
+                        backend=default_backend()
+                    ).decryptor()
+                    blob = fdecryptor.update(headblock[:-16])
+                    headblock = headblock[-16:]
+            else:
+                blob = fdecryptor.update(
+                    b"%b%b" % (headblock, chunk[:-16])
+                )
+                headblock = chunk[-16:]
+            if blob is not None:
+                if not headers:
+                    if b"\0\0" not in blob:
+                        eparser.feed(blob)
+                        continue
+                    headersrest, blob = blob.split(b"\0\0")
+                    eparser.feed(headersrest)
+                    headers = eparser.close()
+                    # check  what to do
+                    t = headers.get("SPKC-Type", MessageType.email)
+                    if t == MessageType.email:
+                        argv.file.write(headers.as_bytes(
+                            unixfrom=True,
+                            policy=policy.SMTP
+                        ))
             argv.file.write(blob)
-        else:
-            # TODO: use better algorithm than split
-            headers, content = blob.split(b"\n\n", 1)
-            argv.file.write(content)
     else:
         queried_webrefs = {}
         queried_messages = {}
