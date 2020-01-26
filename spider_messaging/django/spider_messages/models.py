@@ -199,6 +199,17 @@ class WebReference(DataContent):
             return {"message"}
         return set()
 
+    def map_data(self, name, field, data, graph, context):
+        if name == "encrypted_content":
+            url = self.associated.get_absolute_url("message")
+            url = "{}{}?{}".format(
+                context["hostpart"], url, context["context"]["sanitized_GET"]
+            )
+            return Literal(url, datatype=XSD.anyURI)
+        elif name == "key_list":
+            return Literal(json.dumps(data), datatype=XSD.anyURI)
+        return super().map_data(name, field, data, graph, context)
+
     def access_redirect(self, kwargs):
         # dead code for now
         ret = HttpResponsePermanentRedirect(
@@ -418,6 +429,8 @@ class MessageContent(DataContent):
                 context["hostpart"], url, context["context"]["sanitized_GET"]
             )
             return Literal(url, datatype=XSD.anyURI)
+        elif name == "key_list":
+            return Literal(json.dumps(data), datatype=XSD.anyURI)
 
         return super().map_data(name, field, data, graph, context)
 
