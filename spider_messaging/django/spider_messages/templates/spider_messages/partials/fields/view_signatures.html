@@ -8,17 +8,20 @@
   <ul class="w3-white">
     {% for val in field|field_to_python %}
       {% literalize val.key field as LiteralLink %}
+      {% literalize val.hash field as LiteralHash %}
       {% literalize val.signature field as LiteralSignature %}
       <li style="word-break:break-all;">
         <a href="{{LiteralLink}}" property="spkc:value">{{val.hash|truncatechars:"20"}}</a>
         <span about="{{LiteralLink}}" rel="spkc:properties">
+          <data hidden="hidden" typeof="spkc:Property">
+            <data hidden="hidden" property="spkc:name" datatype="xsd:string">hash</data>
+            <data hidden="hidden" property="spkc:hashable" datatype="xsd:boolean">false</data>
+            <data hidden="hidden" property="spkc:value" datatype="{{LiteralHash.datatype}}">{{LiteralHash}}</data>
+          </data>
           <span typeof="spkc:Property">
             <data hidden="hidden" property="spkc:name" datatype="xsd:string">signature</data>
             <data hidden="hidden" property="spkc:hashable" datatype="xsd:boolean">false</data>
-            <data hidden="hidden" property="spkc:value" datatype="{{LiteralSignature.datatype}}">{{LiteralSignature}}</data>
-            <span>
-              {{val.signature|default:"-"}}
-            </span>
+            <span property="spkc:value" content="{{LiteralSignature}}" datatype="{{LiteralSignature.datatype}}">{{val.signature|default:"-"}}</span>
           </span>
         </span>
       </li>

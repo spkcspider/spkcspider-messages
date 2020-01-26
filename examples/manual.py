@@ -658,7 +658,26 @@ def action_check(argv, priv_key, pub_key_hash, session, g):
             csrftoken = list(g_token.objects(
                 predicate=spkcgraph["csrftoken"])
             )[0]
-            finished_signatures = []
+            fields = dict(map(
+                lambda x: (x[0].toPython(), x[1].toPython()),
+                g_token.query(
+                    """
+                        SELECT DISTINCT ?fieldname ?value
+                        WHERE {
+                            ?base spkc:fieldname ?fieldname .
+                            ?base spkc:value ?value .
+                        }
+                    """,
+                    initNs={"spkc": spkcgraph},
+                )
+            ))
+            breakpoint()
+
+            fields["signatures"] = \
+                list(filter(
+                    lambda x: x not in can_fix,
+                    json.loads(fields["signatures"])
+                ))
             for key in can_fix:
                 # currently only one priv key is supported
                 signature = priv_key.sign(
@@ -669,7 +688,7 @@ def action_check(argv, priv_key, pub_key_hash, session, g):
                     ),
                     src_hash
                 )
-                finished_signatures.append(
+                fields["signatures"].append(
                     {
                         "hash": key[0].hex(),
                         "signature": "{}={}".format(
@@ -678,11 +697,11 @@ def action_check(argv, priv_key, pub_key_hash, session, g):
                         )
                     }
                 )
+
+            fields["signatures"] = json.dumps(fields["signatures"])
             # update
             response = session.post(
-                postbox_update, data={
-                    "signatures": json.dumps(finished_signatures)
-                }, headers={
+                postbox_update, data=fields, headers={
                     "X-CSRFToken": csrftoken,
                     "X-TOKEN": argv.token
                 }
