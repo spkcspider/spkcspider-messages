@@ -10,7 +10,6 @@ class CbFileResponse(FileResponse):
 
     def close(self):
         super().close()
-        if self.status_code == 200:
-            successful_transmitted.send(
-                sender=CbFileResponse, response=self
-            )
+        successful_transmitted.send(
+            sender=CbFileResponse, response=self
+        )

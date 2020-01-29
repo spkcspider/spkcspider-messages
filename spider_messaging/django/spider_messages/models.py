@@ -19,7 +19,7 @@ from rdflib import XSD, Literal
 from spkcspider.apps.spider import registry
 from spkcspider.apps.spider.conf import get_requests_params
 from spkcspider.apps.spider.models import (
-    AssignedContent, AttachedFile, ContentVariant, DataContent
+    AttachedFile, ContentVariant, DataContent
 )
 from spkcspider.apps.spider.queryfilters import info_or
 from spkcspider.constants import VariantType, spkcgraph
@@ -196,43 +196,23 @@ class WebReference(DataContent):
 
     def get_abilities(self, context):
         if context["request"].is_owner:
-            return {"message"}
+            return {"message", "bypass"}
         return set()
 
     def map_data(self, name, field, data, graph, context):
-        if name == "encrypted_content":
-            url = self.associated.get_absolute_url("message")
-            url = "{}{}?{}".format(
-                context["hostpart"], url, context["context"]["sanitized_GET"]
-            )
-            return Literal(url, datatype=XSD.anyURI)
-        elif name == "key_list":
-            return Literal(json.dumps(data), datatype=XSD.anyURI)
+        if name == "key_list":
+            return Literal(json.dumps(data), datatype=XSD.string)
         return super().map_data(name, field, data, graph, context)
 
-    def access_redirect(self, kwargs):
-        # dead code for now
+    @csrf_exempt
+    def access_bypass(self, kwargs):
         ret = HttpResponsePermanentRedirect(
-            redirect_to=self.url
+            redirect_to=self.quota_data["url"]
         )
         # ret["X-TYPE"] = kwargs["rtype"].name
-        ret["X-KEYLIST"] = json.dumps(self.key_list)
-
-        q = models.Q()
-        for i in kwargs["request"].POST.getlist("keyhash"):
-            q |= models.Q(
-                target__info__contains="\x1epubkeyhash=%s" %
-                i
-            )
-        self.associated.smarttags.filter(
-            kwargs["request"].POST.getlist("keyhash")
-        ).update(name="received")
-        # remove completed
-        AssignedContent.objects.filter(
-            ctype__name="WebReference"
-        ).exclude(
-            smarttags__name="unread"
-        ).delete()
+        ret["X-KEYLIST"] = json.dumps(self.quota_data["key_list"])
+        # delete self, as link can point into nothing
+        self.associated.delete()
         return ret
 
     @csrf_exempt
@@ -418,9 +398,6 @@ class MessageContent(DataContent):
         ret = super().get_form_kwargs(request=request, **kwargs)
         ret["request"] = request
         return ret
-
-    def access_raw_update(self, **kwargs):
-        pass
 
     def map_data(self, name, field, data, graph, context):
         if name == "encrypted_content":

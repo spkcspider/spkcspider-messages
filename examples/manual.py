@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+
 import sys
 import os
 import argparse
@@ -610,12 +611,12 @@ def action_check(argv, priv_key, pub_key_hash, session, g):
     src_hash = getattr(
         hashes, next(iter(src.values()))["hash_algorithm"].upper()
     )()
-    src_activator_value, errored = argv.attestation.check_signatures(
+    src_activator_value, errored, key_list = argv.attestation.check_signatures(
         map(
             lambda x: (x["key"], x["signature"]),
             src.values()
         ), algo=src_hash
-    )[:2]
+    )
     tmp = list(g.query(
         """
             SELECT DISTINCT ?value
@@ -635,14 +636,18 @@ def action_check(argv, priv_key, pub_key_hash, session, g):
     if base64.urlsafe_b64decode(tmp[0][0].value) != src_activator_value:
         return "activator doesn't match shown activator"
     if errored:
+        breakpoint()
         pub_key_hash_bin = bytes.fromhex(pub_key_hash)
-        can_fix = list(filter(lambda x: x[0] == pub_key_hash_bin, errored))
+        can_fix = set(filter(
+            lambda x: x == pub_key_hash_bin,
+            map(lambda x: x[0], errored)
+        ))
         if not argv.fix:
             if can_fix and postbox:
                 print("Can fix signature")
         else:
             if not can_fix or not postbox:
-                return ", ".join(map(lambda x: x[0].hex(), errored))
+                return ", ".join(map(lambda x: x.hex(), errored))
 
             postbox_update = replace_action(
                 postbox, "update/"
@@ -657,7 +662,7 @@ def action_check(argv, priv_key, pub_key_hash, session, g):
             g_token.parse(data=response.content, format="html")
             csrftoken = list(g_token.objects(
                 predicate=spkcgraph["csrftoken"])
-            )[0]
+            )[0].toPython()
             fields = dict(map(
                 lambda x: (x[0].toPython(), x[1].toPython()),
                 g_token.query(
@@ -671,32 +676,33 @@ def action_check(argv, priv_key, pub_key_hash, session, g):
                     initNs={"spkc": spkcgraph},
                 )
             ))
-            breakpoint()
 
-            fields["signatures"] = \
-                list(filter(
-                    lambda x: x not in can_fix,
-                    json.loads(fields["signatures"])
-                ))
-            for key in can_fix:
-                # currently only one priv key is supported
-                signature = priv_key.sign(
-                    src_activator_value,
-                    padding.PSS(
-                        mgf=padding.MGF1(src_hash),
-                        salt_length=padding.PSS.MAX_LENGTH
-                    ),
-                    src_hash
-                )
-                fields["signatures"].append(
-                    {
-                        "hash": key[0].hex(),
-                        "signature": "{}={}".format(
-                            src_hash.name,
-                            base64.urlsafe_b64encode(signature).decode("ascii")
-                        )
-                    }
-                )
+            fields["signatures"] = []
+            for key in key_list:
+                if key[0] not in can_fix:
+                    signature = key[2]
+                else:
+                    # currently only one priv key is supported
+                    signature = priv_key.sign(
+                        src_activator_value,
+                        padding.PSS(
+                            mgf=padding.MGF1(src_hash),
+                            salt_length=padding.PSS.MAX_LENGTH
+                        ),
+                        src_hash
+                    )
+                if signature:
+                    fields["signatures"].append(
+                        {
+                            "hash": key[0].hex(),
+                            "signature": "{}={}".format(
+                                src_hash.name,
+                                base64.urlsafe_b64encode(
+                                    signature
+                                ).decode("ascii")
+                            )
+                        }
+                    )
 
             fields["signatures"] = json.dumps(fields["signatures"])
             # update
@@ -708,9 +714,10 @@ def action_check(argv, priv_key, pub_key_hash, session, g):
             )
             if not response.ok:
                 logger.error("Repair failed: %s", response.text)
-                parser.exit(1, "repair failed\n")
-            logger.debug("Repair succeeded")
-            if len(can_fix) == len(errored):
+                return ", ".join(map(lambda x: x[0].hex(), errored))
+            logger.info("Repair succeeded")
+            errored = list(filter(lambda x: x not in can_fix, errored))
+            if errored == 0:
                 return True
         return ", ".join(map(lambda x: x[0].hex(), errored))
     return True

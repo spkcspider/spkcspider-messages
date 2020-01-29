@@ -25,6 +25,18 @@ from spkcspider.utils.security import get_hashob
 from .widgets import SignatureWidget
 
 
+class SignatureDict(dict):
+    """
+        For serialization in literalize
+    """
+
+    def __str__(self):
+        return json.dumps({
+            "signature": self["signature"],
+            "hash": self["hash"]
+        })
+
+
 class PostBoxForm(DataContentForm):
     only_persistent = forms.BooleanField(required=False)
     setattr(only_persistent, "hashable", False)
@@ -145,12 +157,14 @@ class PostBoxForm(DataContentForm):
             self.initial["attestation"] = \
                 base64.urlsafe_b64encode(hasher).decode("ascii")
             self.initial["signatures"] = [
-                {
-                    "key": x.target,
-                    "hash": x.target.getlist("hash", 1)[0],
-                    "signature": x.data["signature"]
-                } for x in signatures.all()
+                SignatureDict(
+                    key=x.target,
+                    hash=x.target.getlist("hash", 1)[0],
+                    signature=x.data["signature"]
+                ) for x in signatures.all()
             ]
+            if scope == "update":
+                setattr(self.fields["signatures"], "spkc_datatype", XSD.string)
         else:
             del self.fields["attestation"]
             del self.fields["signatures"]
@@ -197,7 +211,6 @@ class PostBoxForm(DataContentForm):
                 i = key_dict.get(sig["hash"])
                 if i:
                     i.data["signature"] = signature
-                print(key_dict)
 
         return {
             "smarttags": key_dict.values()
