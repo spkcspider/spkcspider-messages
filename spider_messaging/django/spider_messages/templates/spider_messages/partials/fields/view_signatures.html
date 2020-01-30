@@ -9,8 +9,8 @@
     {% for val in field|field_to_python %}
       {% literalize val field as valueData %}
       <li style="word-break:break-all;" rel="spkc:value">
-        <a href="{{valueData.items.key}}"  resource="">{{val.hash|truncatechars:"20"}}</a>
-        <span about="{{valueData.items.key}}" rel="spkc:properties">
+        <a href="{{valueData.ref}}"  resource="">{{val.hash|truncatechars:"20"}}</a>
+        <span resource="{{valueData.ref}}" rel="spkc:properties">
           <data hidden="hidden" typeof="spkc:Property">
             <data hidden="hidden" property="spkc:name" datatype="xsd:string">hash</data>
             <data hidden="hidden" property="spkc:hashable" datatype="xsd:boolean">false</data>

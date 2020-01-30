@@ -636,7 +636,6 @@ def action_check(argv, priv_key, pub_key_hash, session, g):
     if base64.urlsafe_b64decode(tmp[0][0].value) != src_activator_value:
         return "activator doesn't match shown activator"
     if errored:
-        breakpoint()
         pub_key_hash_bin = bytes.fromhex(pub_key_hash)
         can_fix = set(filter(
             lambda x: x == pub_key_hash_bin,
@@ -694,7 +693,7 @@ def action_check(argv, priv_key, pub_key_hash, session, g):
                 if signature:
                     fields["signatures"].append(
                         {
-                            "hash": key[0].hex(),
+                            "hash": f"{src_hash.name}={key[0].hex()}",
                             "signature": "{}={}".format(
                                 src_hash.name,
                                 base64.urlsafe_b64encode(

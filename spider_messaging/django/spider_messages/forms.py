@@ -8,7 +8,6 @@ import re
 from cryptography.hazmat.primitives import hashes
 from django import forms
 from django.conf import settings
-from django.db.models import Q
 from django.urls import reverse
 from django.utils.translation import gettext as _
 from rdflib import XSD
@@ -158,11 +157,11 @@ class PostBoxForm(DataContentForm):
             self.initial["attestation"] = \
                 base64.urlsafe_b64encode(hasher).decode("ascii")
             self.initial["signatures"] = [
-                dict(
-                    key=x.target,
-                    hash=x.target.getlist("hash", 1)[0],
-                    signature=x.data["signature"]
-                ) for x in signatures.all()
+                {
+                    None: x.target,
+                    "hash": x.target.getlist("hash", 1)[0],
+                    "signature": x.data["signature"]
+                } for x in signatures.all()
             ]
             setattr(
                 self.fields["signatures"],
@@ -201,18 +200,21 @@ class PostBoxForm(DataContentForm):
                 name="key",
                 target=pubkey,
                 data={
-                    "signature": None,
-                    "hash": pubkey.getlist("hash", 1)[0]
+                    "signature": None
                 }
             )
-            key_dict[smarttag.data["hash"]] = smarttag
+            key_dict[pubkey.getlist("hash", 1)[0]] = smarttag
 
         if self.instance.id:
-            keyhashes_q = Q()
+            keyhashes_q = info_or(
+                pubkeyhash=self.cleaned_data.get("keys", []),
+                hash=self.cleaned_data.get("keys", []),
+                info_fieldname="target__info"
+            )
             for smartkey in self.instance.associated.smarttags.filter(
                 keyhashes_q, name="key"
             ):
-                key_dict[smartkey.data["hash"]] = smartkey
+                key_dict[smartkey.target.getlist("hash", 1)[0]] = smartkey
         for sig in self.cleaned_data.get("signatures", []):
             signature = sig.get("signature")
             if signature:
@@ -230,6 +232,7 @@ class ReferenceForm(DataContentForm):
     key_list = JsonField(
         widget=forms.Textarea()
     )
+    setattr(key_list, "spkc_datatype", XSD.string)
 
     hash_algorithm = forms.CharField(
         required=False, disabled=False

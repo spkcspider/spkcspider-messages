@@ -22,8 +22,8 @@ from spkcspider.apps.spider.models import (
     AttachedFile, ContentVariant, DataContent
 )
 from spkcspider.apps.spider.queryfilters import info_or
-from spkcspider.constants import VariantType, spkcgraph
-from spkcspider.utils.fields import add_by_field, add_property, literalize
+from spkcspider.constants import VariantType
+from spkcspider.utils.fields import add_by_field
 from spkcspider.utils.urls import merge_get_url
 
 from .http import CbFileResponse
@@ -54,25 +54,6 @@ class PostBox(DataContent):
     #    return [
     #        ActionUrl("fetch_message", reverse("spider_messages:message"))
     #    ]
-
-    def map_data(self, name, field, data, graph, context):
-        if name == "signatures":
-            ret = literalize(data["key"], domain_base=context["hostpart"])
-            # per node create a signature Entity
-            value_node = add_property(
-                graph, "signature", ref=ret,
-                literal=literalize(
-                    data["signature"], field, domain_base=context["hostpart"]
-                )
-            )
-
-            graph.add((
-                value_node,
-                spkcgraph["hashable"],
-                Literal(False)
-            ))
-            return ret
-        return super().map_data(name, field, data, graph, context)
 
     @classmethod
     def localize_name(cls, name):
