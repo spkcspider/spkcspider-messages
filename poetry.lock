@@ -379,7 +379,7 @@ description = "A secure, decentral platform for maintaining your online identity
 name = "spkcspider"
 optional = false
 python-versions = ">=3.6"
-version = "0.29.2"
+version = "0.29.4"
 
 [package.dependencies]
 bleach = "*"
@@ -694,8 +694,8 @@ six = [
     {file = "six-1.14.0.tar.gz", hash = "sha256:236bdbdce46e6e6a3d61a337c0f8b763ca1e8717c03b369e87a7ec7ce1319c0a"},
 ]
 spkcspider = [
-    {file = "spkcspider-0.29.2-py3-none-any.whl", hash = "sha256:ed5c2d8df424d5eea2ff79f27d945632c1a3defe82eaa6a3ea0d0903a5a46c1b"},
-    {file = "spkcspider-0.29.2.tar.gz", hash = "sha256:1a5d5658ff2fc8682d26bcd5b4cbfe250a6215fb1a6570337af786facf710cd3"},
+    {file = "spkcspider-0.29.4-py3-none-any.whl", hash = "sha256:b794fec008ed1a78b2307bf68088d3d78764179fc55c1edf56f6c7f2f07208d3"},
+    {file = "spkcspider-0.29.4.tar.gz", hash = "sha256:2f92a011a6eee737b54243ca703ee78baad1dc883abe06a169eba59a5da0b4ba"},
 ]
 spkcspider-domainauth = [
     {file = "spkcspider-domainauth-0.6.2.tar.gz", hash = "sha256:39fa6339e087f3fd283f44beb3e1eb33774f74c88b6cee985c66ada1376ac058"},
