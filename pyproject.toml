@@ -11,7 +11,7 @@ python = ">=3.6"
 rdflib = '*'
 html5lib = '*'
 cryptography = "*"
-spkcspider = {version = ">=0.28", optional=true}
+spkcspider = {version = ">=0.29", optional=true}
 spkcspider-domainauth = {version = ">=0.4", optional=true}
 
 twisted = {version = "*", optional=true}
@@ -24,7 +24,7 @@ django-extensions = "*"
 twisted = "*"
 pyOpenSSL = "*"
 service_identity = "*"
-spkcspider = {version = ">=0.28"}
+spkcspider = {version = ">=0.29"}
 spkcspider-domainauth = {version = ">=0.4"}
 
 
@@ -38,7 +38,7 @@ legacy_tox_ini = """
 [tox]
 minversion = 3.4.0
 skipsdist=true
-envlist = py{35,36,37}-django{30,master}
+envlist = py{36,37,38}-django{30,master}
 
 [testenv]
 commands = python -Wd ./manage.py test tests

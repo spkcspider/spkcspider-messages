@@ -21,6 +21,7 @@ from spkcspider.apps.spider.models import (
 )
 from spkcspider.apps.spider.queryfilters import info_or
 from spkcspider.utils.security import get_hashob
+from spkcspider.constants import spkcgraph
 
 from .widgets import SignatureWidget
 
@@ -157,14 +158,21 @@ class PostBoxForm(DataContentForm):
             self.initial["attestation"] = \
                 base64.urlsafe_b64encode(hasher).decode("ascii")
             self.initial["signatures"] = [
-                SignatureDict(
+                dict(
                     key=x.target,
                     hash=x.target.getlist("hash", 1)[0],
                     signature=x.data["signature"]
                 ) for x in signatures.all()
             ]
-            if scope == "update":
-                setattr(self.fields["signatures"], "spkc_datatype", XSD.string)
+            setattr(
+                self.fields["signatures"],
+                "spkc_datatype",
+                {
+                    None: spkcgraph["Content"],
+                    "hash": XSD.string,
+                    "signature": XSD.string
+                }
+            )
         else:
             del self.fields["attestation"]
             del self.fields["signatures"]
