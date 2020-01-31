@@ -25,18 +25,6 @@ from spkcspider.constants import spkcgraph
 from .widgets import SignatureWidget
 
 
-class SignatureDict(dict):
-    """
-        For serialization in literalize
-    """
-
-    def __str__(self):
-        return json.dumps({
-            "signature": self["signature"],
-            "hash": self["hash"]
-        })
-
-
 class PostBoxForm(DataContentForm):
     only_persistent = forms.BooleanField(required=False)
     setattr(only_persistent, "hashable", False)
@@ -192,39 +180,44 @@ class PostBoxForm(DataContentForm):
         return ret
 
     def get_prepared_attachements(self):
-        key_dict = {}
-        for pubkey in self.cleaned_data.get("keys", []):
-            smarttag = SmartTag(
-                content=self.instance.associated,
-                unique=True,
-                name="key",
-                target=pubkey,
-                data={
-                    "signature": None
-                }
-            )
-            key_dict[pubkey.getlist("hash", 1)[0]] = smarttag
-
-        if self.instance.id:
-            keyhashes_q = info_or(
-                pubkeyhash=self.cleaned_data.get("keys", []),
-                hash=self.cleaned_data.get("keys", []),
-                info_fieldname="target__info"
-            )
-            for smartkey in self.instance.associated.smarttags.filter(
-                keyhashes_q, name="key"
-            ):
-                key_dict[smartkey.target.getlist("hash", 1)[0]] = smartkey
-        for sig in self.cleaned_data.get("signatures", []):
-            signature = sig.get("signature")
-            if signature:
-                i = key_dict.get(sig["hash"])
-                if i:
-                    i.data["signature"] = signature
-
-        return {
-            "smarttags": key_dict.values()
+        ret = {
+            "smarttags": []
         }
+        if self.instance.id:
+            smarttags = self.instance.associated.smarttags.filter(
+                name="key"
+            )
+        else:
+            smarttags = SmartTag.objects.none()
+        signatures = dict(
+            map(
+                lambda x: (x["hash"], x.get("signature") or ""),
+                self.cleaned_data.get("signatures", [])
+            )
+        )
+        for pubkey in self.cleaned_data.get("keys", []):
+            smarttag = smarttags.filter(target=pubkey).first()
+            if not smarttag:
+                smarttag = SmartTag(
+                    content=self.instance.associated,
+                    unique=True,
+                    name="key",
+                    target=pubkey,
+                    data={
+                        "signature": None
+                    }
+                )
+            if pubkey.getlist("hash", 1)[0] in signatures:
+                # shown hash of key, it includes some extra information
+                smarttag.data["signature"] = \
+                    signatures[pubkey.getlist("hash", 1)[0]]
+            elif pubkey.getlist("pubkeyhash", 1)[0] in signatures:
+                # in case only the pubkeyhash is available it must be accepted
+                # this is the case for automatic repair
+                smarttag.data["signature"] = \
+                    signatures[pubkey.getlist("pubkeyhash", 1)[0]]
+            ret["smarttags"].append(smarttag)
+        return ret
 
 
 class ReferenceForm(DataContentForm):
