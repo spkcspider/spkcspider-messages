@@ -230,6 +230,9 @@ class WebReference(DataContent):
                         return HttpResponse("other error", status=502)
 
                     c_length = resp.get("content-length", None)
+                    # TODO: replace by max_size of POST parameter, postbox and
+                    #    replace size
+                    # TODO: send limit to server to prevent sending file
                     max_length = getattr(
                         settings, "SPIDER_MAX_FILE_SIZE", None
                     )
