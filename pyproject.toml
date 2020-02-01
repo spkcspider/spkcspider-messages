@@ -11,7 +11,7 @@ python = ">=3.6"
 rdflib = '*'
 html5lib = '*'
 cryptography = "*"
-spkcspider = ">=0.30"
+spkcspider = {version = ">=0.30"}
 spkcspider-domainauth = {version = ">=0.4", optional=true}
 
 twisted = {version = "*", optional=true}
@@ -28,8 +28,8 @@ spkcspider-domainauth = {version = ">=0.4"}
 
 
 [tool.poetry.extras]
-django = ["spkcspider-domainauth"]
-test = ["spkcspider[test]", "spkcspider-domainauth"]
+django = ["spkcspider-domainauth", "spkcspider"]
+test = ["spkcspider", "spkcspider-domainauth"]
 email = ["twisted", "service_identity", "pyOpenSSL"]
 
 [tool.tox]

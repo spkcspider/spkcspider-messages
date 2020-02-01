@@ -4,17 +4,14 @@ __all__ = ["PostBox"]
 import logging
 
 import requests
-from rdflib import XSD, Graph, Literal
 from cryptography.hazmat.backends import default_backend
-from cryptography.hazmat.primitives.ciphers import (
-    Cipher, algorithms, modes
-)
 from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import padding
-from spider_messaging.constants import AttestationResult, SendType
+from rdflib import XSD, Graph, Literal
+from spkcspider.constants import spkcgraph, static_token_matcher
 from spkcspider.utils.urls import merge_get_url, replace_action
 
-from spkcspider.constants import static_token_matcher, spkcgraph
+from spider_messaging.constants import AttestationResult, SendType
+from spider_messaging.utils.graph import analyse_dest, analyze_src, get_pages
 
 from . import AttestationChecker
 
@@ -64,7 +61,7 @@ class PostBox(object):
         if not graph:
             assert self.url
             response = self.session.get(
-                merge_get_url(self.url, raw="true"),
+                merge_get_url(self.url, raw="embed"),
                 headers={
                     "X-TOKEN": self.token or ""
                 }
@@ -72,6 +69,14 @@ class PostBox(object):
             response.raise_for_status()
             graph = Graph()
             graph.parse(data=response.content, format="turtle")
+        for page in get_pages(graph):
+            with self.session.get(
+                merge_get_url(self.url, raw="embed", page=page), headers={
+                    "X-TOKEN": self.token or ""
+                }
+            ) as response:
+                response.raise_for_status()
+                graph.parse(data=response.content, format="turtle")
         src = {}
         for i in graph.query(
             """
@@ -144,32 +149,157 @@ class PostBox(object):
             raise
         pass
 
-    def receive(self, id, peek=False, extra_keys=None, max_size=None):
+    def receive(
+        self, id, peek=False, bypass=False, extra_keys=None, max_size=None
+    ):
         if not self.ok:
             raise
 
-    def list_messages(self, limit_to=None):
-        pass
+    def list_messages(self):
+        queried_webrefs = {}
+        queried_messages = {}
+        response = self.session.get(
+            merge_get_url(self.url, raw="embed"),
+            headers={
+                "X-TOKEN": self.token or ""
+            }
+        )
+        response.raise_for_status()
+        graph = Graph()
+        graph.parse(data=response.content, format="turtle")
+        for i in graph.query(
+            """
+            SELECT DISTINCT ?base ?idvalue ?namevalue ?type
+            WHERE {
+                ?base a <https://spkcspider.net/static/schemes/spkcgraph#spkc:Content> ;
+                   spkc:type ?type ;
+                   spkc:properties ?propname , ?propid .
+                ?propid spkc:name ?idname ;
+                        spkc:value ?idvalue .
+                ?propname spkc:name ?namename ;
+                          spkc:value ?namevalue .
+            }
+        """,  # noqa E501
+            initNs={"spkc": spkcgraph},
+            initBindings={
+                "idname": Literal(
+                    "id", datatype=XSD.string
+                ),
+                "namename": Literal(
+                    "name", datatype=XSD.string
+                ),
+
+            }
+        ):
+            if i.type.toPython() == "WebReference":
+                queried = queried_webrefs
+            elif i.type.toPython() == "MessageContent":
+                queried = queried_messages
+            else:
+                continue
+            queried.setdefault(str(i.base), {})
+            queried[str(i.base)]["id"] = i.idvalue
+            queried[str(i.base)]["name"] = i.namevalue
+        return (queried_webrefs, queried_messages)
 
     def check(self, url=None, graph=None):
         if not url or url == self.url:
-            # TODO: after recheck update own state and client list
-            result_own, errored, src_keys = self.attestation_checker.check(
-                self.url,
-                map(
-                    lambda x: (x["key"], x["signature"]),
-                    src.values()
-                ),
-                algo=self.hash_algo
+            response = self.session.get(
+                merge_get_url(self.url, raw="embed"),
+                headers={
+                    "X-TOKEN": self.token or ""
+                }
             )
-            if result_own == AttestationResult.domain_unknown:
-                logger.critical(
-                    "home url unknown, should not happen"
+            response.raise_for_status()
+            graph = Graph()
+            graph.parse(data=response.content, format="turtle")
+            for page in get_pages(graph):
+                with self.session.get(
+                    merge_get_url(self.url, raw="embed", page=page), headers={
+                        "X-TOKEN": self.token or ""
+                    }
+                ) as response:
+                    response.raise_for_status()
+                    graph.parse(data=response.content, format="turtle")
+            src = {}
+            for i in graph.query(
+                """
+                    SELECT
+                    ?postbox ?key_name ?key_value
+                    WHERE {
+                        ?postbox spkc:properties ?property .
+                        ?property spkc:name ?postbox_name ;
+                                spkc:value ?postbox_value .
+                        ?postbox_value spkc:properties ?key_base_prop .
+                        ?key_base_prop spkc:name ?key_name ;
+                                    spkc:value ?key_value .
+                    }
+                """,
+                initNs={"spkc": spkcgraph},
+                initBindings={
+                    "postbox_name": Literal(
+                        "signatures", datatype=XSD.string
+                    )
+                }
+            ):
+                value = str(i.postbox_value)
+                src.setdefault(value, {})
+                src[value][str(i.key_name)] = i.key_value
+            self.state, errored, self.client_list = \
+                self.attestation_checker.check(
+                    self.url,
+                    map(
+                        lambda x: (x["key"], x["signature"]),
+                        src.values()
+                    ),
+                    algo=self.hash_algo, auto_add=True
                 )
-            elif result_own != AttestationResult.success:
-                logger.critical(
-                    "Home base url contains invalid keys, hacked?"
+            return self.state, errored, self.client_list
+        # url was specified
+        response = self.session.get(
+            merge_get_url(url, raw="embed")
+        )
+        response.raise_for_status()
+        graph = Graph()
+        graph.parse(data=response.content, format="turtle")
+        for page in get_pages(graph):
+            response = self.session.get(
+                merge_get_url(self.url, raw="embed", page=page)
+            )
+            response.raise_for_status()
+            graph.parse(data=response.content, format="turtle")
+        src = {}
+        for i in graph.query(
+            """
+                SELECT
+                ?postbox ?key_name ?key_value
+                WHERE {
+                    ?postbox spkc:properties ?property .
+                    ?property spkc:name ?postbox_name ;
+                            spkc:value ?postbox_value .
+                    ?postbox_value spkc:properties ?key_base_prop .
+                    ?key_base_prop spkc:name ?key_name ;
+                                spkc:value ?key_value .
+                }
+            """,
+            initNs={"spkc": spkcgraph},
+            initBindings={
+                "postbox_name": Literal(
+                    "signatures", datatype=XSD.string
                 )
+            }
+        ):
+            value = str(i.postbox_value)
+            src.setdefault(value, {})
+            src[value][str(i.key_name)] = i.key_value
+        return self.attestation_checker.check(
+            url,
+            map(
+                lambda x: (x["key"], x["signature"]),
+                src.values()
+            ),
+            algo=self.hash_algo, auto_add=True
+        )
 
     def sign(self, url=None, token=None):
         pass

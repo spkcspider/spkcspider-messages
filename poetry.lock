@@ -487,12 +487,12 @@ test = ["zope.event"]
 testing = ["coverage", "nose", "zope.event"]
 
 [extras]
-django = ["spkcspider-domainauth"]
+django = ["spkcspider-domainauth", "spkcspider"]
 email = ["twisted", "service_identity", "pyOpenSSL"]
-test = ["spkcspider-domainauth"]
+test = ["spkcspider", "spkcspider-domainauth"]
 
 [metadata]
-content-hash = "2a4c4b48db099f5021518f9d07ec3ab34b7e6c30ba03d57413d5590e0d41684b"
+content-hash = "072152b598b3a551d192b55a61c7e6598558d8f3946064c421b9b6caec67ac20"
 python-versions = ">=3.6"
 
 [metadata.files]

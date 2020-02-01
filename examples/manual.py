@@ -103,8 +103,7 @@ def action_send(argv, priv_key, pub_key_hash, src_keys, session, g_src):
     dest = {}
     g_dest = Graph()
     g_dest.parse(data=response_dest.content, format="turtle")
-    pages = get_pages(g_dest)
-    for page in range(2, pages+1):
+    for page in get_pages(g_dest):
         with session.get(
             merge_get_url(dest_url, page=page), headers={
                 "X-TOKEN": argv.token
@@ -394,7 +393,6 @@ def action_view(argv, priv_key, pem_public, own_url, session, g_message):
     else:
         queried_webrefs = {}
         queried_messages = {}
-        g_message.serialize(destination='output.txt', format='turtle')
         for i in g_message.query(
             """
             SELECT DISTINCT ?base ?idvalue ?namevalue ?type
@@ -651,8 +649,7 @@ def main(argv):
 
         g = Graph()
         g.parse(data=response.content, format="turtle")
-        pages = get_pages(g)
-        for page in range(2, pages+1):
+        for page in get_pages(g):
             with s.get(
                 merge_get_url(own_url, page=page), headers={
                     "X-TOKEN": argv.token

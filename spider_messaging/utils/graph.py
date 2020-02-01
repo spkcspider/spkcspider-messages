@@ -9,7 +9,7 @@ from .misc import replace_action
 
 
 def get_pages(graph):
-    tmp = list(graph.query(
+    tmp = list(map(lambda x: x[0], graph.query(
         """
             SELECT ?pages
             WHERE {
@@ -17,9 +17,22 @@ def get_pages(graph):
             }
         """,
         initNs={"spkc": spkcgraph}
-    ))
-    pages = tmp[0][0].toPython()
-    return pages
+    )))
+    pages = tmp[0].toPython()
+
+    read_pages = set(map(lambda x: x[0].toPython(), graph.query(
+        """
+            SELECT ?page
+            WHERE {
+                ?base spkc:pages.current_page ?page .
+            }
+        """,
+        initNs={"spkc": spkcgraph}
+    )))
+
+    for page in range(1, pages+1):
+        if page not in read_pages:
+            yield page
 
 
 def analyze_src(graph):
