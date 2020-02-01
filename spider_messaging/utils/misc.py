@@ -1,4 +1,4 @@
-__all__ = ["EncryptedFile", "replace_action"]
+__all__ = ["EncryptedFile"]
 
 import io
 
@@ -35,16 +35,3 @@ class EncryptedFile(io.RawIOBase):
                     break
             ret, self._left = self._left[:size], self._left[size:]
             return ret
-
-
-def replace_action(url, action):
-    url = url.split("?", 1)
-    # urljoin does not join correctly, removes token because of no ending /
-    return "?".join(
-        [
-            "/".join((
-                url[0].rstrip("/").rsplit("/", 1)[0], action.lstrip("/")
-            )),
-            url[1] if len(url) >= 2 else ""
-        ]
-    )

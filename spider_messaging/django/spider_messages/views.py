@@ -55,7 +55,7 @@ class MessageContentView(UserTestMixin, View):
         f = self.object.attachedfiles.get(
             name="encrypted_content"
         )
-        s = request.get("X-MAX-LENGTH")
+        s = request.get("X-MAX-CONTENT-LENGTH") or None
         if s is not None:
             try:
                 s = int(s)

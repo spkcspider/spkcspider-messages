@@ -2,6 +2,7 @@ __all__ = [
     "PostBox", "WebReference", "MessageContent"
 ]
 import json
+import math
 import logging
 from itertools import chain
 
@@ -10,7 +11,7 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.files import File
 from django.core.files.temp import NamedTemporaryFile
-from django.db import models, transaction
+from django.db import models
 from django.http import HttpResponse, HttpResponsePermanentRedirect
 from django.test import Client
 from django.utils.translation import pgettext
@@ -140,21 +141,6 @@ class WebReference(DataContent):
     class Meta:
         proxy = True
 
-    def update_used_space(self, size_diff):
-        #
-        if size_diff == 0:
-            return
-        f = "remote"
-        with transaction.atomic():
-            self.associated.usercomponent.user_info.update_with_quota(
-                size_diff, f
-            )
-            self.associated.usercomponent.user_info.save(
-                update_fields=[
-                    "used_space_local", "used_space_remote"
-                ]
-            )
-
     def get_priority(self):
         return -10
 
@@ -207,6 +193,17 @@ class WebReference(DataContent):
                 unique=True,
                 name="cache"
             )
+            max_size = \
+                kwargs["request"].get("X-MAX-CONTENT-LENGTH") or math.inf
+            if isinstance(max_size, str):
+                max_size = int(max_size)
+            max_size = min(
+                self.associated.user_info.get_free_space("remote"),
+                self.associated.attached_to_content.free_data.get(
+                    "max_size", math.inf
+                ),
+                max_size
+            )
             params, inline_domain = get_requests_params(self.quota_data["url"])
             fp = None
             if inline_domain:
@@ -219,29 +216,23 @@ class WebReference(DataContent):
                                 kwargs["hostpart"],
                                 kwargs["request"].path
                             )
-                        ), SERVER_NAME=inline_domain
+                        ),
+                        SERVER_NAME=inline_domain,
+                        HTTP_X_MAX_CONTENT_LENGTH=(
+                            max_size if max_size != math.inf else ""
+                        )
                     )
                     if resp.status_code != 200:
-
                         logging.info(
                             "file retrieval failed: \"%s\" failed",
                             self.url
                         )
                         return HttpResponse("other error", status=502)
 
-                    c_length = resp.get("content-length", None)
-                    # TODO: replace by max_size of POST parameter, postbox and
-                    #    replace size
-                    # TODO: send limit to server to prevent sending file
-                    max_length = getattr(
-                        settings, "SPIDER_MAX_FILE_SIZE", None
-                    )
-                    if (
-                        max_length and (
-                            c_length is None or
-                            c_length > max_length
-                        )
-                    ):
+                    c_length = resp.get("content-length", math.inf)
+                    if isinstance(c_length, str):
+                        c_length = int(c_length)
+                    if max_size < c_length:
                         return HttpResponse(
                             "Too big/not specified", status=413
                         )
@@ -252,7 +243,7 @@ class WebReference(DataContent):
                     )
                     for chunk in resp:
                         written_size += fp.write(chunk)
-                    self.update_used_space(written_size)
+                    self.update_used_space(written_size, "remote")
                     # saves object
                     cached_content.file.save("", File(fp))
                 except ValidationError as exc:
@@ -272,18 +263,22 @@ class WebReference(DataContent):
                                     kwargs["request"].path
                                 )
                             ),
-                            "Connection": "close"
+                            "Connection": "close",
+                            "X-MAX-CONTENT-LENGTH": (
+                                max_size if max_size != math.inf else ""
+                            )
                         },
                         stream=True,
                         **params
                     ) as resp:
                         resp.raise_for_status()
-                        c_length = resp.headers.get("content-length", None)
-                        if (
-                            c_length is None or
-                            c_length > int(settings.MAX_UPLOAD_SIZE)
-                        ):
-                            return HttpResponse("Too big", status=413)
+                        c_length = resp.get("content-length", math.inf)
+                        if isinstance(c_length, str):
+                            c_length = int(c_length)
+                        if max_size < c_length:
+                            return HttpResponse(
+                                "Too big/not specified", status=413
+                            )
                         fp = NamedTemporaryFile(
                             suffix='.upload',
                             dir=settings.FILE_UPLOAD_TEMP_DIR
@@ -293,7 +288,7 @@ class WebReference(DataContent):
                             fp.DEFAULT_CHUNK_SIZE
                         ):
                             written_size += fp.write(chunk)
-                        self.update_used_space(written_size)
+                        self.update_used_space(written_size, "remote")
                         # saves object
                         cached_content.file.save("", File(fp))
 

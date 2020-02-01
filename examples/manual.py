@@ -19,13 +19,13 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 from rdflib import Graph, XSD, Literal
 
-from spkcspider.utils.urls import merge_get_url
+from spkcspider.utils.urls import merge_get_url, replace_action
 from spkcspider.constants import static_token_matcher, spkcgraph
 
 from spider_messaging.constants import AttestationResult, MessageType
 from spider_messaging.protocols.attestation import AttestationChecker
 from spider_messaging.utils.keys import load_priv_key
-from spider_messaging.utils.misc import EncryptedFile, replace_action
+from spider_messaging.utils.misc import EncryptedFile
 from spider_messaging.utils.graph import analyse_dest, analyze_src, get_pages
 
 

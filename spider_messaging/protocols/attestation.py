@@ -1,3 +1,4 @@
+__all__ = ["AttestationChecker"]
 
 import base64
 import binascii
@@ -9,8 +10,8 @@ from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 
-from .constants import AttestationResult, DomainInfo, KeyTriple
-from .keys import load_public_key
+from spider_messaging.constants import AttestationResult, DomainInfo, KeyTriple
+from spider_messaging.utils.keys import load_public_key
 
 
 def _extract_hash_key2(val, algo=None):

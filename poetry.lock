@@ -379,7 +379,7 @@ description = "A secure, decentral platform for maintaining your online identity
 name = "spkcspider"
 optional = false
 python-versions = ">=3.6"
-version = "0.29.4"
+version = "0.30"
 
 [package.dependencies]
 bleach = "*"
@@ -487,12 +487,12 @@ test = ["zope.event"]
 testing = ["coverage", "nose", "zope.event"]
 
 [extras]
-django = ["spkcspider", "spkcspider-domainauth"]
+django = ["spkcspider-domainauth"]
 email = ["twisted", "service_identity", "pyOpenSSL"]
 test = ["spkcspider-domainauth"]
 
 [metadata]
-content-hash = "7e7f8838b6b519ecdf32785f03ebac9f11d2e8f900776cc43a9299bc69803fa7"
+content-hash = "2a4c4b48db099f5021518f9d07ec3ab34b7e6c30ba03d57413d5590e0d41684b"
 python-versions = ">=3.6"
 
 [metadata.files]
@@ -694,8 +694,8 @@ six = [
     {file = "six-1.14.0.tar.gz", hash = "sha256:236bdbdce46e6e6a3d61a337c0f8b763ca1e8717c03b369e87a7ec7ce1319c0a"},
 ]
 spkcspider = [
-    {file = "spkcspider-0.29.4-py3-none-any.whl", hash = "sha256:b794fec008ed1a78b2307bf68088d3d78764179fc55c1edf56f6c7f2f07208d3"},
-    {file = "spkcspider-0.29.4.tar.gz", hash = "sha256:2f92a011a6eee737b54243ca703ee78baad1dc883abe06a169eba59a5da0b4ba"},
+    {file = "spkcspider-0.30-py3-none-any.whl", hash = "sha256:f08ce1348d0026de07376a23e072e76fd32ffcc4f586c05c737b7489bb985acb"},
+    {file = "spkcspider-0.30.tar.gz", hash = "sha256:9217002534305c5b40aeb4d66290de19ec6da2d09033692b8346285f47c96e5f"},
 ]
 spkcspider-domainauth = [
     {file = "spkcspider-domainauth-0.6.2.tar.gz", hash = "sha256:39fa6339e087f3fd283f44beb3e1eb33774f74c88b6cee985c66ada1376ac058"},
