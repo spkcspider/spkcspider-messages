@@ -39,3 +39,16 @@ class MessageType(str, enum.Enum):
     def __bytes__(self):
         # for headers
         return self.value.encode("ascii")
+
+
+class SendType(str, enum.Enum):
+    # shared with other clients
+    shared = "shared"
+    # only this client has access
+    private = "private"
+    # don't leave a trace who sent the email
+    stealth = "stealth"
+
+    def __str__(self):
+        # output value instead of member name
+        return self.value

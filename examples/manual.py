@@ -6,7 +6,6 @@ import argparse
 import logging
 import base64
 import json
-import io
 from email import policy, parser as emailparser
 # import re
 
@@ -24,10 +23,10 @@ from spkcspider.utils.urls import merge_get_url
 from spkcspider.constants import static_token_matcher, spkcgraph
 
 from spider_messaging.constants import AttestationResult, MessageType
-from spider_messaging.attestation import (
-    AttestationChecker
-)
-from spider_messaging.keys import load_priv_key
+from spider_messaging.protocols.attestation import AttestationChecker
+from spider_messaging.utils.keys import load_priv_key
+from spider_messaging.utils.misc import EncryptedFile, replace_action
+from spider_messaging.utils.graph import analyse_dest, analyze_src, get_pages
 
 
 logger = logging.getLogger(__name__)
@@ -89,147 +88,6 @@ send_parser.add_argument(
 send_parser.add_argument(
     'dest', action="store", help='Destination url'
 )
-
-
-class EncryptedFile(io.RawIOBase):
-    iterob = None
-    _left = b""
-
-    def __init__(self, fencryptor, nonce, fileob, headers="\n"):
-        self.iterob = self.init_iter(fencryptor, nonce, fileob, headers)
-
-    @staticmethod
-    def init_iter(fencryptor, nonce, fileob, headers):
-        yield b"%b\0" % nonce
-        yield fencryptor.update(b"%b\n" % headers)
-        chunk = fileob.read(512)
-        while chunk:
-            assert isinstance(chunk, bytes)
-            yield fencryptor.update(chunk)
-            chunk = fileob.read(512)
-        yield fencryptor.finalize()
-        yield fencryptor.tag
-
-    def read(self, size=-1):
-        if size == -1:
-            return b"".join(self.iterob)
-        elif size < len(self._left):
-            ret, self._left = self._left[:size], self._left[size:]
-            return ret
-        else:
-            for chunk in self.iterob:
-                self._left += chunk
-                if len(self._left) >= size:
-                    break
-            ret, self._left = self._left[:size], self._left[size:]
-            return ret
-
-
-def replace_action(url, action):
-    url = url.split("?", 1)
-    # urljoin does not join correctly, removes token because of no ending /
-    return "?".join(
-        [
-            "/".join((
-                url[0].rstrip("/").rsplit("/", 1)[0], action.lstrip("/")
-            )),
-            url[1] if len(url) >= 2 else ""
-        ]
-    )
-
-
-def get_pages(graph):
-    tmp = list(graph.query(
-        """
-            SELECT ?pages
-            WHERE {
-                ?base spkc:pages.num_pages ?pages .
-            }
-        """,
-        initNs={"spkc": spkcgraph}
-    ))
-    pages = tmp[0][0].toPython()
-    return pages
-
-
-def analyze_src(graph):
-    component_uriref = graph.value(
-        predicate=spkcgraph["create:name"], object=Literal(
-            "MessageContent", datatype=XSD.string
-        )
-    )
-    # src_postbox_url = merge_get_url(src_postbox_url, raw="true")
-    options = {}
-    for i in graph.query(
-        """
-            SELECT ?key ?value
-            WHERE {
-                ?postbox spkc:type ?postbox_type.
-                ?postbox spkc:properties ?base .
-                ?base spkc:name ?key ;
-                      spkc:value ?value .
-            }
-        """,
-        initNs={"spkc": spkcgraph},
-        initBindings={
-            "postbox_type": Literal(
-                "PostBox", datatype=XSD.string
-            )
-        }
-    ):
-        if isinstance(i.value, Literal):
-            options[str(i.key)] = i.value.value
-
-    return component_uriref, options
-
-
-def analyse_dest(graph):
-    postbox_uriref = graph.value(
-        predicate=spkcgraph["ability:name"],
-        object=Literal("push_webref", datatype=XSD.string)
-    )
-    if not postbox_uriref:
-        return None, None, {}, None
-        # parser.exit(1, "dest does not support push_webref ability\n")
-    webref_url = replace_action(str(postbox_uriref), "push_webref/")
-    # response_dest = session.get(
-    #     merge_get_url(webref_url, raw="embed")
-    # )
-    # if not response_dest.ok:
-    #    logger.info("Dest returned error: %s", response_dest.text)
-    #     parser.exit(1, "url invalid\n")
-    # g_dest = Graph()
-    # g_dest.parse(data=response_dest.content, format="turtle")
-
-    domain_keys = {}
-
-    for i in graph.query(
-        """
-            SELECT
-            ?postbox_value ?value ?key_name ?key_value
-            WHERE {
-                ?postbox spkc:properties ?base_prop .
-                ?base_prop spkc:name ?postbox_name ;
-                           spkc:value ?postbox_value .
-                ?postbox_value spkc:properties ?key_base_prop .
-                ?key_base_prop spkc:name ?key_name ;
-                               spkc:value ?key_value .
-            }
-        """,
-        initNs={"spkc": spkcgraph},
-        initBindings={
-            "postbox": postbox_uriref,
-            "postbox_name": Literal(
-                "signatures", datatype=XSD.string
-            )
-        }
-    ):
-        domain_keys.setdefault(str(i.postbox_value), {})
-        domain_keys[str(i.postbox_value)][str(i.key_name)] = i.key_value.value
-    hash_algo = getattr(
-        hashes, next(iter(domain_keys.values()))["hash_algorithm"].upper()
-    )()
-    return postbox_uriref, webref_url, domain_keys, hash_algo
 
 
 def action_send(argv, priv_key, pub_key_hash, src_keys, session, g_src):
