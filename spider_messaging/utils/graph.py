@@ -1,4 +1,4 @@
-__all__ = ["get_pages", "analyze_src", "analyse_dest"]
+__all__ = ["get_pages", "analyze_src", "analyse_dest", "get_hash"]
 
 from rdflib import XSD, Literal
 
@@ -33,6 +33,32 @@ def get_pages(graph):
     for page in range(1, pages+1):
         if page not in read_pages:
             yield page
+
+
+def get_hash(graph, url=None):
+    tmp = list(map(lambda x: x[0], graph.query(
+        """
+            SELECT ?hash_algo
+            WHERE {
+                ?postbox spkc:type ?postbox_type.
+                ?postbox spkc:properties ?base .
+                ?base spkc:name  ?prop_name ;
+                      spkc:value ?hash_algo .
+            }
+        """,
+        initNs={"spkc": spkcgraph},
+        initBindings={
+            "postbox_type": Literal(
+                "PostBox", datatype=XSD.string
+            ),
+            "prop_name": Literal(
+                "hash_algorithm", datatype=XSD.string
+            )
+        }
+    )))
+    return getattr(
+        hashes, tmp[0].toPython().upper()
+    )()
 
 
 def analyze_src(graph):

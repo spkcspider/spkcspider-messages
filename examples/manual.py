@@ -266,7 +266,6 @@ def action_send(argv, priv_key, pub_key_hash, src_keys, session, g_src):
             "key_list": json.dumps(dest_key_list)
         }
     )
-    response_dest.raise_for_status()
 
     if not response_dest.ok:
         logger.error("Sending message failed: %s", response_dest.text)
