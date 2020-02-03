@@ -194,13 +194,15 @@ class WebReference(DataContent):
                 name="cache"
             )
             max_size = \
-                kwargs["request"].get("X-MAX-CONTENT-LENGTH") or math.inf
+                kwargs["request"].headers.get(
+                    "X-MAX-CONTENT-LENGTH"
+                ) or math.inf
             if isinstance(max_size, str):
                 max_size = int(max_size)
             max_size = min(
                 self.associated.user_info.get_free_space("remote"),
-                self.associated.attached_to_content.free_data.get(
-                    "max_size", math.inf
+                self.associated.attached_to_content.content.free_data.get(
+                    "max_receive_size", math.inf
                 ),
                 max_size
             )

@@ -462,7 +462,7 @@ def action_check(argv, priv_key, pub_key_hash, session, g):
         map(
             lambda x: (x["key"], x["signature"]),
             src.values()
-        ), algo=src.src_hash_algo
+        ), algo=argv.src_hash_algo
     )
     tmp = list(g.query(
         """

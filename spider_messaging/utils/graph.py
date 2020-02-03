@@ -1,11 +1,11 @@
 __all__ = ["get_pages", "analyze_src", "analyse_dest", "get_hash"]
 
+import base64
 from rdflib import XSD, Literal
 
+from spkcspider.utils.urls import replace_action
 from spkcspider.constants import spkcgraph
 from cryptography.hazmat.primitives import hashes
-
-from .misc import replace_action
 
 
 def get_pages(graph):
@@ -145,6 +145,7 @@ def analyse_dest(graph):
 
         }
     ))
+    attestation = base64.urlsafe_b64decode(attestation[0][0])
     return (
         postbox_uriref, webref_url, domain_keys, hash_algo, attestation
     )

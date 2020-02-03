@@ -26,6 +26,13 @@ from .widgets import SignatureWidget
 
 
 class PostBoxForm(DataContentForm):
+    max_receive_size = forms.IntegerField(
+        initial=None, required=False,
+        help_text=_(
+            "maximal message size received"
+        )
+    )
+    setattr(max_receive_size, "hashable", False)
     only_persistent = forms.BooleanField(required=False)
     setattr(only_persistent, "hashable", False)
     shared = forms.BooleanField(required=False, initial=True)
@@ -85,7 +92,11 @@ class PostBoxForm(DataContentForm):
 
     extract_pubkeyhash = re.compile("\x1epubkeyhash=([^\x1e=]+)=([^\x1e=]+)")
 
-    free_fields = {"only_persistent": False, "shared": True}
+    free_fields = {
+        "only_persistent": False,
+        "shared": True,  # TODO: specify default_mode
+        "max_receive_size": None
+    }
 
     def __init__(self, scope, request, **kwargs):
         super().__init__(**kwargs)
@@ -257,8 +268,8 @@ class ReferenceForm(DataContentForm):
     def clean_key_list(self):
         ret = self.cleaned_data["key_list"]
         for val in ret.values():
-            # 256 bits = current maximum of AESGCM
-            if len(val) > 32:
+            # key is extended by padding + base64 so extra buffer
+            if len(val) > 8000:
                 raise forms.ValidationError(
                     _("key has invalid length")
                 )
@@ -266,6 +277,8 @@ class ReferenceForm(DataContentForm):
 
     def clean(self):
         ret = super().clean()
+        if "key_list" not in self.cleaned_data:
+            return ret
         if (
             "hash_algorithm" in self.initial and
             not self.cleaned_data.get("hash_algorithm")
