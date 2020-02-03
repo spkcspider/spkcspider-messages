@@ -1,32 +1,31 @@
 #!/usr/bin/env python3
 
-import sys
-import os
 import argparse
-import logging
 import base64
 import json
-from email import policy, parser as emailparser
-# import re
+import logging
+import os
+import sys
+from email import parser as emailparser
+from email import policy
 
 import requests
 # from cryptography.x509.oid import NameOID
 from cryptography.hazmat.backends import default_backend
-from cryptography.hazmat.primitives.ciphers import (
-    Cipher, algorithms, modes
-)
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
-from rdflib import Graph, XSD, Literal
-
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from rdflib import XSD, Graph, Literal
+from spkcspider.constants import spkcgraph, static_token_matcher
 from spkcspider.utils.urls import merge_get_url, replace_action
-from spkcspider.constants import static_token_matcher, spkcgraph
 
 from spider_messaging.constants import AttestationResult, MessageType
 from spider_messaging.protocols.attestation import AttestationChecker
+from spider_messaging.utils.graph import analyse_dest, analyze_src, get_pages
 from spider_messaging.utils.keys import load_priv_key
 from spider_messaging.utils.misc import EncryptedFile
-from spider_messaging.utils.graph import analyse_dest, analyze_src, get_pages
+
+# import re
 
 
 logger = logging.getLogger(__name__)
@@ -105,13 +104,12 @@ def action_send(argv, priv_key, pub_key_hash, src_keys, session, g_src):
     g_dest.parse(data=response_dest.content, format="turtle")
     for page in get_pages(g_dest):
         with session.get(
-            merge_get_url(dest_url, page=page), headers={
-                "X-TOKEN": argv.token
-            }
+            merge_get_url(dest_url, page=page)
         ) as response:
             response.raise_for_status()
             g_dest.parse(data=response.content, format="turtle")
-    dest_postbox_url, webref_url, dest, dest_hash_algo = analyse_dest(g_dest)
+    dest_postbox_url, webref_url, dest, dest_hash_algo, attestation = \
+        analyse_dest(g_dest)
 
     bdomain = dest_postbox_url.split("?", 1)[0]
     result_dest, _, dest_keys = argv.attestation.check(
@@ -119,17 +117,14 @@ def action_send(argv, priv_key, pub_key_hash, src_keys, session, g_src):
         map(
             lambda x: (x["key"], x["signature"]),
             dest.values()
-        ),
+        ), attestation=attestation,
         algo=dest_hash_algo
     )
     if result_dest == AttestationResult.domain_unknown:
         logger.info("add domain: %s", bdomain)
         argv.attestation.add(
             bdomain,
-            map(
-                lambda x: (x["key"], x["signature"]),
-                dest.values()
-            ),
+            dest_keys,
             algo=dest_hash_algo
         )
     elif result_dest == AttestationResult.error:
@@ -463,14 +458,11 @@ def action_check(argv, priv_key, pub_key_hash, session, g):
         src.setdefault(str(i.key_base), {})
         src[str(i.key_base)][str(i.key_name)] = i.key_value
 
-    src_hash = getattr(
-        hashes, next(iter(src.values()))["hash_algorithm"].upper()
-    )()
     src_activator_value, errored, key_list = argv.attestation.check_signatures(
         map(
             lambda x: (x["key"], x["signature"]),
             src.values()
-        ), algo=src_hash
+        ), algo=src.src_hash_algo
     )
     tmp = list(g.query(
         """
@@ -540,17 +532,18 @@ def action_check(argv, priv_key, pub_key_hash, session, g):
                     signature = priv_key.sign(
                         src_activator_value,
                         padding.PSS(
-                            mgf=padding.MGF1(src_hash),
+                            mgf=padding.MGF1(argv.src_hash_algo),
                             salt_length=padding.PSS.MAX_LENGTH
                         ),
-                        src_hash
+                        argv.src_hash_algo
                     )
                 if signature:
                     fields["signatures"].append(
                         {
-                            "hash": f"{src_hash.name}={key[0].hex()}",
+                            "hash":
+                                f"{argv.src_hash_algo.name}={key[0].hex()}",
                             "signature": "{}={}".format(
-                                src_hash.name,
+                                argv.src_hash_algo.name,
                                 base64.urlsafe_b64encode(
                                     signature
                                 ).decode("ascii")

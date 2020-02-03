@@ -4,19 +4,26 @@ __all__ = ["PostBox"]
 import base64
 import json
 import logging
+import os
+import tempfile
+import io
+from email import parser as emailparser
+from email import policy
 
 import requests
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from rdflib import XSD, Graph, Literal
-from spkcspider.constants import spkcgraph, static_token_matcher
+from spkcspider.constants import spkcgraph
 from spkcspider.utils.urls import merge_get_url, replace_action
+from spkcspider.utils.misc import EncryptedFile
 
-from spider_messaging.constants import AttestationResult, SendType
-from spider_messaging.utils.graph import (
-    analyse_dest, analyze_src, get_hash, get_pages
+from spider_messaging.constants import (
+    AccessMethod, AttestationResult, MessageType, SendType
 )
+from spider_messaging.utils.graph import analyse_dest, get_hash, get_pages
 
 from . import AttestationChecker
 
@@ -149,91 +156,46 @@ class PostBox(object):
                 self.url, self.client_list, self.hash_algo, attestation=atth
             )
 
-    def send(self, ob, receivers, headers=None, mode=SendType.shared):
-        if not self.ok:
-            raise
-        component_uriref, src_options = analyze_src(g_src)
-        if not component_uriref:
-            parser.exit(1, "Source cannot create messages, logged in?")
-
-        dest_url = merge_get_url(argv.dest, raw="embed", search="_type=PostBox")
-        response_dest = session.get(dest_url)
+    def _send_dest(self, aes_key, fetch_url, dest):
+        dest_url = merge_get_url(
+            dest, raw="embed", search="_type=PostBox")
+        response_dest = self.session.get(dest_url)
         if not response_dest.ok:
             logger.info("Dest returned error: %s", response_dest.text)
-            parser.exit(1, "retrieval failed, invalid url?\n")
+            raise Exception("retrieval failed, invalid url?")
         dest = {}
         g_dest = Graph()
         g_dest.parse(data=response_dest.content, format="turtle")
         for page in get_pages(g_dest):
-            with session.get(
-                merge_get_url(dest_url, page=page), headers={
-                    "X-TOKEN": argv.token
-                }
+            with self.session.get(
+                merge_get_url(dest_url, page=page)
             ) as response:
                 response.raise_for_status()
                 g_dest.parse(data=response.content, format="turtle")
-        dest_postbox_url, webref_url, dest, dest_hash_algo = analyse_dest(g_dest)
+        dest_postbox_url, webref_url, dest, dest_hash_algo, attestation = \
+            analyse_dest(g_dest)
 
         bdomain = dest_postbox_url.split("?", 1)[0]
-        result_dest, _, dest_keys = argv.attestation.check(
+        result_dest, _, dest_keys = self.attestation_checker.check(
             bdomain,
             map(
                 lambda x: (x["key"], x["signature"]),
                 dest.values()
-            ),
-            algo=dest_hash_algo
+            ), attestation=attestation,
+            algo=dest_hash_algo, auto_add=True
         )
         if result_dest == AttestationResult.domain_unknown:
             logger.info("add domain: %s", bdomain)
-            argv.attestation.add(
+            self.attestation_checker.attestation.add(
                 bdomain,
-                map(
-                    lambda x: (x["key"], x["signature"]),
-                    dest.values()
-                ),
+                dest_keys,
                 algo=dest_hash_algo
             )
         elif result_dest == AttestationResult.error:
             logger.critical("Dest base url contains invalid keys.")
-            parser.exit(1, "dest contains invalid keys\n")
+            raise Exception("dest contains invalid keys\n")
 
-        # 256 bit
-        aes_key = os.urandom(32)
-        nonce = os.urandom(13)
-        fencryptor = Cipher(
-            algorithms.AES(aes_key),
-            modes.GCM(nonce),
-            backend=default_backend()
-        ).encryptor()
-        src_key_list = {}
         dest_key_list = {}
-        if argv.stealth:
-            pass
-        elif src_options["shared"]:
-            for k in src_keys:
-                enc = k[1].encrypt(
-                    aes_key,
-                    padding.OAEP(
-                        mgf=padding.MGF1(algorithm=argv.src_hash_algo),
-                        algorithm=argv.src_hash_algo, label=None
-                    )
-                )
-                # encrypt decryption key
-                src_key_list[
-                    "%s=%s" % (argv.src_hash_algo.name, k[0].hex())
-                ] = base64.urlsafe_b64encode(enc).decode("ascii")
-        else:
-            enc = priv_key.public_key().encrypt(
-                aes_key,
-                padding.OAEP(
-                    mgf=padding.MGF1(algorithm=argv.src_hash_algo),
-                    algorithm=argv.src_hash_algo, label=None
-                )
-            )
-            # encrypt decryption key
-            src_key_list[
-                "%s=%s" % (argv.src_hash_algo.name, pub_key_hash)
-            ] = base64.urlsafe_b64encode(enc).decode("ascii")
 
         for k in dest_keys:
             enc = k[1].encrypt(
@@ -247,42 +209,104 @@ class PostBox(object):
             dest_key_list[
                 "%s=%s" % (dest_hash_algo.name, k[0].hex())
             ] = base64.urlsafe_b64encode(enc).decode("ascii")
+
+        response_dest = self.session.post(
+            webref_url, data={
+                "url": fetch_url,
+                "key_list": json.dumps(dest_key_list)
+            }
+        )
+        response_dest.raise_for_status()
+        # return No
+
+    def send(self, inp, receivers, headers=None, mode=SendType.shared):
+        if not self.ok:
+            raise
+        if not hasattr(receivers, "__iter__"):
+            receivers = [receivers]
+
+        if isinstance(inp, (bytes, memoryview)):
+            inp = io.BytesIO(bytes(inp))
+        elif isinstance(inp, str):
+            inp = io.BytesIO(inp.encode("utf8"))
+
+        # 256 bit
+        aes_key = os.urandom(32)
+        nonce = os.urandom(13)
+        fencryptor = Cipher(
+            algorithms.AES(aes_key),
+            modes.GCM(nonce),
+            backend=default_backend()
+        ).encryptor()
+        src_key_list = {}
+        if mode == SendType.stealth:
+            pass
+        elif mode == SendType.private:
+            enc = self.priv_key.public_key().encrypt(
+                aes_key,
+                padding.OAEP(
+                    mgf=padding.MGF1(algorithm=self.hash_algo),
+                    algorithm=self.hash_algo, label=None
+                )
+            )
+            # encrypt decryption key
+            src_key_list[
+                "%s=%s" % (self.hash_algo.name, self.pub_key_hash)
+            ] = base64.urlsafe_b64encode(enc).decode("ascii")
+        elif mode == SendType.shared:
+            for k in self.client_list:
+                enc = k[1].encrypt(
+                    aes_key,
+                    padding.OAEP(
+                        mgf=padding.MGF1(algorithm=self.hash_algo),
+                        algorithm=self.hash_algo, label=None
+                    )
+                )
+                # encrypt decryption key
+                src_key_list[
+                    "%s=%s" % (self.hash_algo.name, k[0].hex())
+                ] = base64.urlsafe_b64encode(enc).decode("ascii")
+        else:
+            raise NotImplementedError()
+
         headers = b"SPKC-Type: %b\n" % MessageType.file
 
         # remove raw as we parse html
         message_create_url = merge_get_url(
-            replace_action(str(component_uriref), "add/MessageContent/"), raw=None
+            replace_action(
+                self.url, "add/MessageContent/"
+            ), raw=None
         )
-        response = session.get(
+        response = self.session.get(
             message_create_url, headers={
-                "X-TOKEN": argv.token
+                "X-TOKEN": self.token
             }
         )
         if not response.ok:
             logger.error("retrieval csrftoken failed: %s", response.text)
-            parser.exit(1, "retrieval csrftoken failed: %s" % response.text)
+            raise
         g = Graph()
         g.parse(data=response.content, format="html")
         csrftoken = list(g.objects(predicate=spkcgraph["csrftoken"]))[0]
         # create message object
-        response = session.post(
+        response = self.session.post(
             message_create_url, data={
-                "own_hash": pub_key_hash,
+                "own_hash": self.hash_key_public,
                 "key_list": json.dumps(src_key_list),
-                "amount_tokens": 1
+                "amount_tokens": len(receivers)
             }, headers={
                 "X-CSRFToken": csrftoken,
-                "X-TOKEN": argv.token  # only for src
+                "X-TOKEN": self.token  # only for src
             },
             files={
                 "encrypted_content": EncryptedFile(
-                    fencryptor, nonce, argv.file, headers
+                    fencryptor, nonce, inp, headers
                 )
             }
         )
         if not response.ok or message_create_url == response.url:
             logger.error("Message creation failed: %s", response.text)
-            parser.exit(1, "Message creation failed: %s" % response.text)
+            raise
         g = Graph()
         g.parse(data=response.content, format="html")
         fetch_url = list(map(lambda x: x.value, g.query(
@@ -319,22 +343,40 @@ class PostBox(object):
 
         if not fetch_url or not tokens:
             logger.error("Message creation failed: %s", response.text)
-            parser.exit(1, "Message creation failed")
-        # extract url
-        response_dest = session.post(
-            webref_url, data={
-                "url": merge_get_url(fetch_url[0], token=str(tokens[0])),
-                "key_list": json.dumps(dest_key_list)
-            }
-        )
-        response_dest.raise_for_status()
+            raise Exception("Message creation failed")
+        fetch_url = fetch_url[0].toPython()
+        for receiver, token in zip(receivers, tokens):
+            furl = merge_get_url(fetch_url, token=token)
+            try:
+                self._send_dest(aes_key, furl, receiver)
+            except Exception as exc:
+                logger.exception(exc)
+                # for autoremoval simulate access
+                self.session.get(furl)
 
     def receive(
-        self, id, peek=False, bypass=False, extra_keys=None, max_size=None
+        self, message_id, outfp=None, access_method=AccessMethod.view,
+        extra_keys=None, max_size=None
     ):
         if not self.ok:
             raise
-        result = list(g_message.query(
+
+        response = self.session.get(
+            merge_get_url(self.url, raw="embed"),
+            headers={
+                "X-TOKEN": self.token or ""
+            }
+        )
+        response.raise_for_status()
+        graph = Graph()
+        graph.parse(data=response.content, format="turtle")
+        for page in get_pages(graph):
+            with self.session.get(
+                merge_get_url(self.url, raw="embed", page=page)
+            ) as response:
+                response.raise_for_status()
+                graph.parse(data=response.content, format="turtle")
+        result = list(graph.query(
             """
                 SELECT DISTINCT ?base ?hash_algorithm ?type
                 WHERE {
@@ -349,7 +391,7 @@ class PostBox(object):
             """,  # noqa E501
             initNs={"spkc": spkcgraph},
             initBindings={
-                "idvalue": Literal(argv.message_id),
+                "idvalue": Literal(message_id),
                 "algname": Literal(
                     "hash_algorithm", datatype=XSD.string
                 ),
@@ -362,48 +404,53 @@ class PostBox(object):
         if not result or result[0].type.toPython() not in {
             "WebReference", "MessageContent"
         }:
-            parser.exit(0, "message not found\n")
-        pub_key_hasher = getattr(
+            return None
+        hash_algo = getattr(
             hashes, result[0].hash_algorithm.upper()
         )()
 
-        digest = hashes.Hash(pub_key_hasher, backend=default_backend())
-        digest.update(pem_public)
+        if not outfp:
+            outfp = tempfile.TempFile()
+
+        digest = hashes.Hash(hash_algo, backend=default_backend())
+        digest.update(self.pem_key_public)
         pub_key_hashalg = "%s=%s" % (
-            pub_key_hasher.name,
+            hash_algo.name,
             digest.finalize().hex()
         )
         retrieve_url = merge_get_url(
             replace_action(
-                result[0].base, "message/"
+                result[0].base,
+                "bypass/" if access_method == AccessMethod.view else "message/"
             )
         )
-        if argv.action == "peek":
-            response = session.get(
+        if access_method == AccessMethod.view:
+            response = self.session.post(
                 retrieve_url, stream=True, headers={
-                    "X-TOKEN": argv.token
-                }
-            )
-        else:
-            response = session.post(
-                retrieve_url, stream=True, headers={
-                    "X-TOKEN": argv.token
+                    "X-TOKEN": self.token
                 }, data={
                     "keyhash": pub_key_hashalg
                 }
             )
+        else:
+            # peek, bypass
+            response = self.session.get(
+                retrieve_url, stream=True, headers={
+                    "X-TOKEN": self.token
+                }
+            )
         if not response.ok:
             logger.info("Message retrieval failed: %s", response.text)
-            parser.exit(0, "message could not be fetched\n")
+            raise
         key_list = json.loads(response.headers["X-KEYLIST"])
         key = key_list.get(pub_key_hashalg, None)
         if not key:
-            parser.exit(0, "message not for me\n")
-        decrypted_key = priv_key.decrypt(
+            raise Exception("message not for me\n")
+        decrypted_key = self.priv_key.decrypt(
             base64.urlsafe_b64decode(key),
             padding.OAEP(
-                mgf=padding.MGF1(algorithm=argv.src_hash_algo),
-                algorithm=argv.src_hash_algo,
+                mgf=padding.MGF1(algorithm=hash_algo),
+                algorithm=hash_algo,
                 label=None
             )
         )
@@ -442,12 +489,12 @@ class PostBox(object):
                 # check  what to do
                 t = headers.get("SPKC-Type", MessageType.email)
                 if t == MessageType.email:
-                    argv.file.write(headers.as_bytes(
+                    outfp.write(headers.as_bytes(
                         unixfrom=True,
                         policy=policy.SMTP
                     ))
-            argv.file.write(blob)
-        argv.file.write(fdecryptor.finalize_with_tag(headblock))
+            outfp.write(blob)
+        outfp.write(fdecryptor.finalize_with_tag(headblock))
 
     def list_messages(self):
         queried_webrefs = {}

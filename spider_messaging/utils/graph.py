@@ -98,8 +98,7 @@ def analyse_dest(graph):
         object=Literal("push_webref", datatype=XSD.string)
     )
     if not postbox_uriref:
-        return None, None, {}, None
-        # parser.exit(1, "dest does not support push_webref ability\n")
+        return None, None, {}, None, None
     webref_url = replace_action(str(postbox_uriref), "push_webref/")
 
     domain_keys = {}
@@ -130,4 +129,22 @@ def analyse_dest(graph):
     hash_algo = getattr(
         hashes, next(iter(domain_keys.values()))["hash_algorithm"].upper()
     )()
-    return postbox_uriref, webref_url, domain_keys, hash_algo
+    attestation = list(graph.query(
+        """
+            SELECT DISTINCT ?value
+            WHERE {
+                ?base spkc:name ?name .
+                ?base spkc:value ?value .
+            }
+        """,
+        initNs={"spkc": spkcgraph},
+        initBindings={
+            "name": Literal(
+                "attestation", datatype=XSD.string
+            ),
+
+        }
+    ))
+    return (
+        postbox_uriref, webref_url, domain_keys, hash_algo, attestation
+    )
