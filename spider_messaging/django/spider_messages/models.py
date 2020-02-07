@@ -193,10 +193,7 @@ class WebReference(DataContent):
                 unique=True,
                 name="cache"
             )
-            max_size = \
-                kwargs["request"].headers.get(
-                    "X-MAX-CONTENT-LENGTH"
-                ) or math.inf
+            max_size = kwargs["request"].POST.get("max_size") or math.inf
             if isinstance(max_size, str):
                 max_size = int(max_size)
             max_size = min(
@@ -210,8 +207,14 @@ class WebReference(DataContent):
             fp = None
             if inline_domain:
                 try:
-                    resp = Client().get(
-                        self.quota_data["url"], follow=True, secure=True,
+                    resp = Client().post(
+                        self.quota_data["url"],
+                        {
+                            "max_size": (
+                                max_size if max_size != math.inf else ""
+                            )
+                        },
+                        follow=True, secure=True,
                         Connection="close",
                         Referer=merge_get_url(
                             "%s%s" % (
@@ -219,10 +222,7 @@ class WebReference(DataContent):
                                 kwargs["request"].path
                             )
                         ),
-                        SERVER_NAME=inline_domain,
-                        HTTP_X_MAX_CONTENT_LENGTH=(
-                            max_size if max_size != math.inf else ""
-                        )
+                        SERVER_NAME=inline_domain
                     )
                     if resp.status_code != 200:
                         logging.info(
@@ -256,8 +256,13 @@ class WebReference(DataContent):
                     return HttpResponse("Quota", status=413)
             else:
                 try:
-                    with requests.get(
+                    with requests.post(
                         self.quota_data["url"],
+                        data={
+                            "max_size": (
+                                max_size if max_size != math.inf else ""
+                            )
+                        },
                         headers={
                             "Referer": merge_get_url(
                                 "%s%s" % (
@@ -265,10 +270,7 @@ class WebReference(DataContent):
                                     kwargs["request"].path
                                 )
                             ),
-                            "Connection": "close",
-                            "X-MAX-CONTENT-LENGTH": (
-                                max_size if max_size != math.inf else ""
-                            )
+                            "Connection": "close"
                         },
                         stream=True,
                         **params

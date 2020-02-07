@@ -51,11 +51,14 @@ class MessageContentView(UserTestMixin, View):
         )
         return self.receivers.exists()
 
+    def post(self, request, *args, **kwargs):
+        return self.get(request, *args, **kwargs)
+
     def get(self, request, *args, **kwargs):
         f = self.object.attachedfiles.get(
             name="encrypted_content"
         )
-        s = request.headers.get("X-MAX-CONTENT-LENGTH") or None
+        s = request.POST.get("max_size") or None
         if s is not None:
             try:
                 s = int(s)
@@ -81,5 +84,5 @@ class MessageContentView(UserTestMixin, View):
     def options(self, request, *args, **kwargs):
         ret = super().options(request, *args, **kwargs)
         ret["Access-Control-Allow-Origin"] = "*"
-        ret["Access-Control-Allow-Methods"] = "GET, OPTIONS"
+        ret["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
         return ret

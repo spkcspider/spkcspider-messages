@@ -60,12 +60,18 @@ view_parser.add_argument(
     nargs="?", default=sys.stdout.buffer
 )
 view_parser.add_argument(
+    '--max', help='Max size', type=int, default=None
+)
+view_parser.add_argument(
     'message_id', help='View message with id', nargs="?", type=int
 )
 peek_parser = subparsers.add_parser("peek")
 peek_parser.add_argument(
     '--file', help='Use file instead stdout', type=argparse.FileType('wb'),
     nargs="?", default=sys.stdout.buffer
+)
+peek_parser.add_argument(
+    '--max', help='Max size', type=int, default=None
 )
 peek_parser.add_argument(
     'message_id', help='View message with id', nargs="?", type=int
@@ -314,20 +320,16 @@ def action_view(argv, priv_key, pem_public, own_url, session, g_message):
                 result[0].base, "message/"
             )
         )
-        if argv.action == "peek":
-            response = session.get(
-                retrieve_url, stream=True, headers={
-                    "X-TOKEN": argv.token
-                }
-            )
-        else:
-            response = session.post(
-                retrieve_url, stream=True, headers={
-                    "X-TOKEN": argv.token
-                }, data={
-                    "keyhash": pub_key_hashalg
-                }
-            )
+        data = {
+            "max_size": argv.max
+        }
+        if argv.action == "view":
+            data["keyhash"] = pub_key_hashalg
+        response = session.post(
+            retrieve_url, stream=True, headers={
+                "X-TOKEN": argv.token
+            }, data=data
+        )
         if not response.ok:
             logger.info("Message retrieval failed: %s", response.text)
             parser.exit(0, "message could not be fetched\n")

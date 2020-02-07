@@ -24,7 +24,7 @@ def SuccessMessageContentCb(sender, response, **kwargs):
     if hasattr(response, "msgcopies"):
         response.msgcopies.update(name="received")
     # remove completed, cascading are deleted with signals
-    AssignedContent.tokens.filter(
+    AssignedContent.objects.filter(
         ctype__name="MessageContent"
     ).exclude(
         models.Q(attachedtokens__isnull=False) |

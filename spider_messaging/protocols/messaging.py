@@ -219,7 +219,9 @@ class PostBox(object):
         response_dest.raise_for_status()
         # return No
 
-    def send(self, inp, receivers, headers=None, mode=SendType.shared):
+    def send(
+        self, inp, receivers, headers=None, mode=SendType.shared, aes_key=None
+    ):
         if not self.ok:
             raise
         if not hasattr(receivers, "__iter__"):
@@ -231,7 +233,9 @@ class PostBox(object):
             inp = io.BytesIO(inp.encode("utf8"))
 
         # 256 bit
-        aes_key = os.urandom(32)
+        if not aes_key:
+            aes_key = os.urandom(32)
+        assert len(aes_key) == 32
         nonce = os.urandom(13)
         fencryptor = Cipher(
             algorithms.AES(aes_key),
@@ -404,7 +408,7 @@ class PostBox(object):
         if not result or result[0].type.toPython() not in {
             "WebReference", "MessageContent"
         }:
-            return None
+            raise Exception("No Message")
         hash_algo = getattr(
             hashes, result[0].hash_algorithm.upper()
         )()
@@ -424,28 +428,23 @@ class PostBox(object):
                 "bypass/" if access_method == AccessMethod.view else "message/"
             )
         )
+        data = {
+            "max_size": max_size or ""
+        }
         if access_method == AccessMethod.view:
-            response = self.session.post(
-                retrieve_url, stream=True, headers={
-                    "X-TOKEN": self.token
-                }, data={
-                    "keyhash": pub_key_hashalg
-                }
-            )
-        else:
-            # peek, bypass
-            response = self.session.get(
-                retrieve_url, stream=True, headers={
-                    "X-TOKEN": self.token
-                }
-            )
+            data["keyhash"] = pub_key_hashalg
+        response = self.session.post(
+            retrieve_url, stream=True, headers={
+                "X-TOKEN": self.token
+            }, data=data
+        )
         if not response.ok:
             logger.info("Message retrieval failed: %s", response.text)
             raise
         key_list = json.loads(response.headers["X-KEYLIST"])
         key = key_list.get(pub_key_hashalg, None)
         if not key:
-            raise Exception("message not for me\n")
+            raise Exception("message not for me")
         decrypted_key = self.priv_key.decrypt(
             base64.urlsafe_b64decode(key),
             padding.OAEP(
@@ -495,6 +494,7 @@ class PostBox(object):
                     ))
             outfp.write(blob)
         outfp.write(fdecryptor.finalize_with_tag(headblock))
+        return outfp, decrypted_key
 
     def list_messages(self):
         queried_webrefs = {}
