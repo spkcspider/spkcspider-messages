@@ -7,13 +7,22 @@ class EncryptedFile(io.RawIOBase):
     iterob = None
     _left = b""
 
-    def __init__(self, fencryptor, nonce, fileob, headers="\n"):
+    def __init__(self, fencryptor, nonce, fileob, headers=""):
         self.iterob = self.init_iter(fencryptor, nonce, fileob, headers)
 
     @staticmethod
     def init_iter(fencryptor, nonce, fileob, headers):
+        if isinstance(headers, dict):
+            headers = b"\n".join(
+                map(
+                    lambda x: b"%b: %b" % (
+                        x[0].encode("utf8") if isinstance(x[0], str) else x[0],
+                        x[1].encode("utf8") if isinstance(x[0], str) else x[1]
+                    )
+                )
+            )
         yield b"%b\0" % nonce
-        yield fencryptor.update(b"%b\n" % headers)
+        yield fencryptor.update(b"%b\n\n" % headers.strip())
         chunk = fileob.read(512)
         while chunk:
             assert isinstance(chunk, bytes)
