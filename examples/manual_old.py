@@ -487,7 +487,7 @@ def action_check(argv, priv_key, pub_key_hash, session, g):
 
         }
     ))
-    if base64.b64decode(tmp[0][0].value) != src_activator_value:
+    if tmp[0][0].toPython() != src_activator_value:
         return "activator doesn't match shown activator"
     if errored:
         pub_key_hash_bin = bytes.fromhex(pub_key_hash)

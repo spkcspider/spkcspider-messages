@@ -15,7 +15,7 @@ from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-from rdflib import XSD, Graph, Literal
+from rdflib import XSD, Graph, Literal, URIRef
 from spkcspider.constants import spkcgraph
 from spkcspider.utils.urls import merge_get_url, replace_action
 
@@ -24,7 +24,7 @@ from spider_messaging.constants import (
 )
 from spider_messaging.exceptions import (
     CheckError, DestException, NotReady, SrcException, ValidationError,
-    WrongRecipient
+    WrongRecipient, DestSecurityException
 )
 from spider_messaging.utils.graph import get_pages, get_postboxes
 from spider_messaging.utils.misc import EncryptedFile
@@ -47,7 +47,9 @@ class PostBox(object):
     pem_key_public = None
     hash_key_public = None
     url = None
+    component_url = None
     token = None
+    merge_instead_x_token = False
     client_list = None
     state = None
 
@@ -67,6 +69,14 @@ class PostBox(object):
         self.url = url.split("?", 1)[0] if url else None
         self.update(token, graph, session)
 
+    def merge_and_headers(self, _url, **kwargs):
+        if self.merge_instead_x_token:
+            return merge_get_url(_url, token=self.token, **kwargs), {}
+        return (
+            merge_get_url(_url, token=self.token, **kwargs),
+            {"X-TOKEN": self.token or ""}
+        )
+
     def update(self, token=None, graph=None, session=None):
         if session:
             self.session = session
@@ -81,20 +91,28 @@ class PostBox(object):
                 "raw": "embed",
                 "search": "_type=PostBox"
             }
-            response = self.session.get(
-                merge_get_url(self.url, **params),
-                headers={
-                    "X-TOKEN": self.token or ""
-                }
-            )
+            self.merge_instead_x_token = False
+            for _ in range(2):
+                merged_url, headers = self.merge_and_headers(
+                    self.url, **params
+                )
+                response = self.session.get(
+                    merged_url,
+                    headers=headers
+                )
+                if response.ok:
+                    break
+                else:
+                    self.merge_instead_x_token = True
             response.raise_for_status()
             graph = Graph()
             graph.parse(data=response.content, format="turtle")
         for page in get_pages(graph):
+            merged_url, headers = self.merge_and_headers(
+                self.url, page=page, **params
+            )
             with self.session.get(
-                merge_get_url(self.url, **params), headers={
-                    "X-TOKEN": self.token or ""
-                }
+                merged_url, headers=headers
             ) as response:
                 response.raise_for_status()
                 graph.parse(data=response.content, format="turtle")
@@ -111,6 +129,10 @@ class PostBox(object):
                     raise SrcException("No postbox found/more than one found")
         else:
             self.url, options = next(iter(postboxes.items()))
+        self.component_url = graph.value(
+            predicate=spkcgraph["contents"],
+            object=URIRef(self.url)
+        ).toPython()
 
         self.hash_algo = options["hash_algorithm"]
 
@@ -146,16 +168,16 @@ class PostBox(object):
 
     def _send_dest(self, aes_key, fetch_url, dest):
         dest_url = merge_get_url(
-            dest, raw="embed", search="_type=PostBox")
-        response_dest = self.session.get(dest_url)
+            dest, raw="embed", search="_type=PostBox"
+        )
+        response_dest = self.session.get(dest_url, timeout=60)
         try:
             response_dest.raise_for_status()
-            dest = {}
             g_dest = Graph()
             g_dest.parse(data=response_dest.content, format="turtle")
             for page in get_pages(g_dest):
                 with self.session.get(
-                    merge_get_url(dest_url, page=page)
+                    merge_get_url(dest_url, page=page), timeout=60
                 ) as response:
                     response.raise_for_status()
                     g_dest.parse(data=response.content, format="turtle")
@@ -167,28 +189,28 @@ class PostBox(object):
             raise DestException("No postbox found/more than one found")
         dest_postbox_url, dest_options = next(iter(dest_postboxes.items()))
         webref_url = replace_action(dest_postbox_url, "push_webref/")
-        dest_hash_algo = dest_options["hash_algorithm"]
         attestation = dest_options["attestation"]
 
         bdomain = dest_postbox_url.split("?", 1)[0]
-        result_dest, _, dest_keys = self.attestation_checker.check(
+        result_dest, errors, dest_keys = self.attestation_checker.check(
             bdomain,
             map(
                 lambda x: (x["key"], x["signature"]),
-                dest.values()
+                dest_options["signatures"].values()
             ), attestation=attestation,
-            algo=dest_hash_algo, auto_add=True
+            algo=dest_options["hash_algorithm"], auto_add=True
         )
         if result_dest == AttestationResult.domain_unknown:
             logger.info("add domain: %s", bdomain)
             self.attestation_checker.attestation.add(
                 bdomain,
                 dest_keys,
-                algo=dest_hash_algo
+                algo=dest_options["hash_algorithm"], embed=True
             )
         elif result_dest == AttestationResult.error:
-            logger.critical("Dest base url contains invalid keys.")
-            raise Exception("dest contains invalid keys\n")
+            if len(dest_keys) == 0:
+                raise DestException("No keys found")
+            raise DestSecurityException("dest contains invalid keys", errors)
 
         dest_key_list = {}
 
@@ -196,22 +218,22 @@ class PostBox(object):
             enc = k[1].encrypt(
                 aes_key,
                 padding.OAEP(
-                    mgf=padding.MGF1(algorithm=dest_hash_algo),
-                    algorithm=dest_hash_algo, label=None
+                    mgf=padding.MGF1(algorithm=dest_options["hash_algorithm"]),
+                    algorithm=dest_options["hash_algorithm"], label=None
                 )
             )
             # encrypt decryption key
             dest_key_list[
-                "%s=%s" % (dest_hash_algo.name, k[0].hex())
+                "%s=%s" % (dest_options["hash_algorithm"].name, k[0].hex())
             ] = base64.b64encode(enc).decode("ascii")
 
-        response_dest = self.session.post(
-            webref_url, data={
-                "url": fetch_url,
-                "key_list": json.dumps(dest_key_list)
-            }
-        )
         try:
+            response_dest = self.session.post(
+                webref_url, data={
+                    "url": fetch_url,
+                    "key_list": json.dumps(dest_key_list)
+                }, timeout=60
+            )
             response_dest.raise_for_status()
         except Exception as exc:
             raise DestException("post webref failed") from exc
@@ -222,7 +244,7 @@ class PostBox(object):
     ):
         if not self.ok:
             raise NotReady()
-        if not hasattr(receivers, "__iter__"):
+        if isinstance(receivers, str):
             receivers = [receivers]
 
         if isinstance(inp, (bytes, memoryview)):
@@ -272,15 +294,13 @@ class PostBox(object):
             raise NotImplementedError()
 
         # remove raw as we parse html
-        message_create_url = merge_get_url(
+        message_create_url, src_headers = self.merge_and_headers(
             replace_action(
-                self.url, "add/MessageContent/"
+                self.component_url, "add/MessageContent/"
             ), raw=None
         )
         response = self.session.get(
-            message_create_url, headers={
-                "X-TOKEN": self.token
-            }
+            message_create_url, headers=src_headers
         )
         try:
             response.raise_for_status()
@@ -299,7 +319,7 @@ class PostBox(object):
                 "amount_tokens": len(receivers)
             }, headers={
                 "X-CSRFToken": csrftoken,
-                "X-TOKEN": self.token  # only for src
+                **src_headers  # only for src
             },
             files={
                 "encrypted_content": EncryptedFile(
@@ -354,7 +374,7 @@ class PostBox(object):
         fetch_url = fetch_url[0].toPython()
         exceptions = []
         for receiver, token in zip(receivers, tokens):
-            furl = merge_get_url(fetch_url, token=token)
+            furl = merge_get_url(fetch_url, token=token.toPython())
             try:
                 self._send_dest(aes_key, furl, receiver)
             except Exception as exc:
@@ -369,23 +389,22 @@ class PostBox(object):
     ):
         if not self.ok:
             raise NotReady()
-        if not extra_key_hashes:
-            extra_key_hashes = set()
-        else:
-            extra_key_hashes = set(extra_key_hashes)
+
+        merged_url, headers = self.merge_and_headers(
+            self.url, raw="embed"
+        )
 
         response = self.session.get(
             merge_get_url(self.url, raw="embed"),
-            headers={
-                "X-TOKEN": self.token or ""
-            }
+            headers=headers
         )
         response.raise_for_status()
         graph = Graph()
         graph.parse(data=response.content, format="turtle")
         for page in get_pages(graph):
             with self.session.get(
-                merge_get_url(self.url, raw="embed", page=page)
+                merge_get_url(merged_url, page=page),
+                headers=headers
             ) as response:
                 response.raise_for_status()
                 graph.parse(data=response.content, format="turtle")
@@ -418,6 +437,7 @@ class PostBox(object):
             "WebReference", "MessageContent"
         }:
             raise SrcException("No Message")
+        # every object has it's own copy of the hash algorithm, used
         hash_algo = getattr(
             hashes, result[0].hash_algorithm.upper()
         )()
@@ -425,16 +445,45 @@ class PostBox(object):
         if not outfp:
             outfp = tempfile.TempFile()
 
-        digest = hashes.Hash(hash_algo, backend=default_backend())
-        digest.update(self.pem_key_public)
-        pub_key_hashalg = "%s=%s" % (
-            hash_algo.name,
-            digest.finalize().hex()
-        )
+        if hash_algo == self.hash_algo:
+            pub_key_hashalg = "%s=%s" % (
+                hash_algo.name,
+                self.hash_key_public.hex()
+            )
+        else:
+            digest = hashes.Hash(hash_algo, backend=default_backend())
+            digest.update(self.pem_key_public)
+            pub_key_hashalg = "%s=%s" % (
+                hash_algo.name,
+                digest.finalize().hex()
+            )
+
+        key_hashes = list()
+        if extra_key_hashes:
+            extra_key_hashes = set(extra_key_hashes)
+            extra_key_hashes.discard(pub_key_hashalg)
+            for key in self.client_list:
+                if key[0] in extra_key_hashes:
+                    if hash_algo == self.hash_algo:
+                        key_hashalg = "%s=%s" % (
+                            hash_algo.name,
+                            key[0]
+                        )
+                    else:
+                        digest = hashes.Hash(
+                            hash_algo, backend=default_backend()
+                        )
+                        digest.update(key[1])
+                        key_hashalg = "%s=%s" % (
+                            hash_algo.name,
+                            digest.finalize().hex()
+                        )
+                    key_hashes.append(key_hashalg)
 
         if access_method == AccessMethod.view:
-            extra_key_hashes.add(pub_key_hashalg)
-        retrieve_url = merge_get_url(
+            key_hashes.append(pub_key_hashalg)
+
+        retrieve_url, headers = self.merge_and_headers(
             replace_action(
                 result[0].base,
                 "bypass/" if access_method == AccessMethod.view else "message/"
@@ -444,12 +493,10 @@ class PostBox(object):
         if access_method != AccessMethod.bypass:
             data.update({
                 "max_size": max_size or "",
-                "keyhash": list(extra_key_hashes)
+                "keyhash": key_hashes
             })
         response = self.session.post(
-            retrieve_url, stream=True, headers={
-                "X-TOKEN": self.token
-            }, data=data
+            retrieve_url, stream=True, headers=headers, data=data
         )
         try:
             response.raise_for_status()
@@ -515,11 +562,12 @@ class PostBox(object):
     def list_messages(self):
         queried_webrefs = {}
         queried_messages = {}
+        merged_url, headers = self.merge_and_headers(
+            self.url, raw="embed"
+        )
         response = self.session.get(
-            merge_get_url(self.url, raw="embed"),
-            headers={
-                "X-TOKEN": self.token or ""
-            }
+            merged_url,
+            headers=headers
         )
         try:
             response.raise_for_status()
@@ -564,7 +612,8 @@ class PostBox(object):
 
     @staticmethod
     def simple_check(
-        url_or_graph, session=None, url=None, checker=None, auto_add=False
+        url_or_graph, session=None, url=None, checker=None, auto_add=False,
+        token=None
     ):
         if isinstance(url_or_graph, Graph):
             graph = url_or_graph
@@ -576,7 +625,9 @@ class PostBox(object):
             response = session.get(
                 merge_get_url(
                     url_or_graph, raw="embed", search="_type=PostBox"
-                )
+                ), headers={
+                    "X-TOKEN": token or ""
+                }
             )
             response.raise_for_status()
             graph = Graph()
@@ -586,7 +637,9 @@ class PostBox(object):
                     merge_get_url(
                         url_or_graph, raw="embed", search="_type=PostBox",
                         page=page
-                    )
+                    ), headers={
+                        "X-TOKEN": token or ""
+                    }
                 )
                 response.raise_for_status()
                 graph.parse(data=response.content, format="turtle")
@@ -634,12 +687,13 @@ class PostBox(object):
         }
 
     def check(self, url=None):
-        if not url or url == self.url:
+        if not url or url.startswith(self.url):
+            merged_url, headers = self.merge_and_headers(
+                self.url, raw="embed", search="_type=PostBox"
+            )
             response = self.session.get(
-                merge_get_url(self.url, raw="embed", search="_type=PostBox"),
-                headers={
-                    "X-TOKEN": self.token or ""
-                }
+                merge_get_url(merged_url, raw="embed", search="_type=PostBox"),
+                headers=headers
             )
             response.raise_for_status()
             graph = Graph()
@@ -647,11 +701,8 @@ class PostBox(object):
             for page in get_pages(graph):
                 with self.session.get(
                     merge_get_url(
-                        self.url, raw="embed", search="_type=PostBox",
-                        page=page
-                    ), headers={
-                        "X-TOKEN": self.token or ""
-                    }
+                        merged_url, page=page
+                    ), headers=headers
                 ) as response:
                     response.raise_for_status()
                     graph.parse(data=response.content, format="turtle")
@@ -671,13 +722,18 @@ class PostBox(object):
                 )
                 response.raise_for_status()
                 graph.parse(data=response.content, format="turtle")
-        if not url or url == self.url:
+        if not url or url.startswith(self.url):
             result = \
                 self.simple_check(
                     graph,
                     url=url, checker=self.attestation_checker,
                     auto_add=True
                 )
+
+            key_hashes = set(map(lambda x: x[0], result["key_list"]))
+            if self.hash_key_public not in key_hashes:
+                self.state = AttestationResult.error
+                raise CheckError("Key is not part of chain")
             self.state = result["result"]
             self.client_list = result["key_list"]
             return result
@@ -689,25 +745,38 @@ class PostBox(object):
             )
 
     def sign(self, confirm=False):
-        postbox_update = replace_action(
-            self.url, "update/"
+        url, headers = self.merge_and_headers(self.url)
+        check_result = self.simple_check(
+            url, token=headers.get("X-TOKEN"),
+            session=self.session,
+
         )
-        # retrieve token
+        errored = set(map(lambda x: x[0], check_result["errors"]))
+
+        key_hashes = set(map(lambda x: x[0], check_result["key_list"]))
+        if self.hash_key_public not in key_hashes:
+            raise CheckError("Key is not part of chain")
+
+        if not confirm:
+            return (
+                self.hash_key_public in errored,
+                check_result["key_list"]
+            )
+        # change to update url
+        postbox_update = merge_get_url(
+            replace_action(
+                self.url, "update/"
+            ), raw="embed", search="_type=PostBox"
+        )
+        # retrieve csrftoken
         response = self.session.get(
-            postbox_update, headers={
-                "X-TOKEN": self.token
-            }
+            postbox_update, headers=headers
         )
         graph = Graph()
         graph.parse(data=response.content, format="html")
         csrftoken = list(graph.objects(
             predicate=spkcgraph["csrftoken"])
         )[0].toPython()
-
-        check_result = self.simple_check(graph, url=self.url)
-
-        if not confirm:
-            return check_result["key_list"]
 
         fields = dict(map(
             lambda x: (x[0].toPython(), x[1].toPython()),
@@ -755,14 +824,17 @@ class PostBox(object):
         response = self.session.post(
             postbox_update, data=fields, headers={
                 "X-CSRFToken": csrftoken,
-                "X-TOKEN": self.token
+                **headers
             }
         )
         try:
             response.raise_for_status()
         except Exception as exc:
             raise SrcException("could not update signature") from exc
-        return check_result["key_list"]
+        return (
+            self.hash_key_public in errored,
+            check_result["key_list"]
+        )
 
     @property
     def ok(self):

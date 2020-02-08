@@ -8,7 +8,15 @@ class DestException(HttpError):
     pass
 
 
+class DestSecurityException(HttpError):
+    pass
+
+
 class SrcException(HttpError):
+    pass
+
+
+class SrcSecurityException(HttpError):
     pass
 
 

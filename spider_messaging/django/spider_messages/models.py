@@ -84,13 +84,14 @@ class PostBox(DataContent):
         )
 
     def get_abilities(self, context):
+        ret = set()
         if (
             context["request"].is_owner or
             not self.free_data["only_persistent"] or
             context["request"].auth_token.persist >= 0
         ):
-            return {"push_webref"}
-        return set()
+            ret.add("push_webref")
+        return ret
 
     @csrf_exempt
     def access_push_webref(self, **kwargs):

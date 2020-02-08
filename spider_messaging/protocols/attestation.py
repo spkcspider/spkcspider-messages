@@ -297,6 +297,8 @@ class AttestationChecker(object):
             not embed or \
             len(key_list) == 0 or \
             isinstance(key_list[0], KeyTriple)
+        if len(key_list) == 0:
+            AttestationResult.error, [], key_list
         only_hashes = set(map(lambda x: x[0], key_list))
         if isinstance(attestation, str):
             attestation = base64.b64decode(attestation)

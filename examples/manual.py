@@ -75,17 +75,21 @@ send_parser.add_argument(
     action="store_true"
 )
 send_parser.add_argument(
-    'dest', action="store", help='Destination url'
+    'dest', action="store", nargs="+", help='Destination url'
 )
 
 
 def action_send(argv):
     try:
-        argv.post_box.send(
+        aes_key, tokens, exceptions = argv.post_box.send(
             argv.file,
             receivers=argv.dest,
             headers=b"SPKC-Type: %b\n" % MessageType.file
         )
+        for i in exceptions:
+            logger.exception(i)
+        if not exceptions:
+            print("success")
     except Exception as exc:
         raise exc
 
@@ -124,13 +128,26 @@ def action_check(argv):
         PostBox.simple_check(
             argv.url, checker=argv.attestation, auto_add=False
         )
+        print("No errors found")
     except Exception as exc:
         raise exc
 
 
 def action_sign(argv):
     try:
-        argv.post_box.sign(True)
+        required, key_list = argv.post_box.sign()
+        if required:
+            print("Keys in chain:")
+            for i in key_list:
+                print("Key:", i[0].hex(), "(Public Key Hash)")
+            if input("Confirm with y: ") == "y":
+                argv.post_box.sign(True)
+            print("Signing successful")
+        else:
+            print("Signature not required")
+            print("Keys in chain:")
+            for i in key_list:
+                print("Key:", i[0].hex(), "(Public Key Hash)")
     except Exception as exc:
         raise exc
 
@@ -161,13 +178,8 @@ def main(argv):
     ):
         parser.exit(1, "url doesn't match action\n")
     if argv.action == "send":
-        match2 = static_token_matcher.match(argv.dest)
-        if not match2:
-            parser.exit(1, "invalid url scheme\n")
-        access2 = match2.groupdict()["access"]
         if (
-            access not in {"list", "view", "push_webref"} or
-            access2 not in {"list", "view", "push_webref"}
+            access not in {"list", "view", "push_webref"}
         ):
             parser.exit(1, "url doesn't match action\n")
 
@@ -180,15 +192,24 @@ def main(argv):
             parser.exit(1, "invalid key: %s\n" % argv.key)
 
     if argv.action == "send":
-        argv.post_box = PostBox(argv.attestation, priv_key, argv.url)
+        argv.post_box = PostBox(
+            argv.attestation, priv_key, argv.url,
+            token=argv.token
+        )
         return action_send(argv)
     elif argv.action in {"view", "peek"}:
-        argv.post_box = PostBox(argv.attestation, priv_key, argv.url)
+        argv.post_box = PostBox(
+            argv.attestation, priv_key, argv.url,
+            token=argv.token
+        )
         return action_view(argv)
     elif argv.action == "check":
         return action_check(argv)
     elif argv.action == "sign":
-        argv.post_box = PostBox(argv.attestation, priv_key, argv.url)
+        argv.post_box = PostBox(
+            argv.attestation, priv_key, argv.url,
+            token=argv.token
+        )
         return action_sign(argv)
 
 
