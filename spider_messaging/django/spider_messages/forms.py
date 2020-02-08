@@ -70,6 +70,9 @@ class PostBoxForm(DataContentForm):
     )
     setattr(attestation, "hashable", True)
     setattr(
+        attestation, "spkc_datatype", XSD.base64Binary
+    )
+    setattr(
         attestation,
         "view_form_field_template",
         "spider_messages/partials/fields/view_combined_keyhash.html"
@@ -154,7 +157,7 @@ class PostBoxForm(DataContentForm):
                 hasher.update(binascii.unhexlify(mh))
             hasher = hasher.finalize()
             self.initial["attestation"] = \
-                base64.urlsafe_b64encode(hasher).decode("ascii")
+                base64.b64encode(hasher).decode("ascii")
             self.initial["signatures"] = [
                 {
                     None: x.target,

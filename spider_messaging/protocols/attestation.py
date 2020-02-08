@@ -155,14 +155,24 @@ class AttestationChecker(object):
         cls, key_list, algo=None, attestation=None, embed=False
     ):
         """
-            attestation: provide attestation instead of generating it again
-            key_list:
-                pairs (hash, key): fails
-                pairs (key, signature): autogeneration of missing key hash
-                triples (hash, key, signature):
-                    hash provided as first argument (more efficient)
-            embed: assert correct triples format, disables checks
-        """
+        Check signatures against (calculated) attestation
+
+        Arguments:
+            key_list {Iterable((key, signature))} -- [description]
+            key_list {Iterable((pubkeyhash, key, signature))} -- hash provided as first argument (more efficient)
+
+        Keyword Arguments:
+            algo {Hash} -- cryptography algorithm for hashing (default: {None})
+            attestation {bytes,str} -- provide attestation instead of generating it again (default: {None})
+            embed {bool} -- assert correct triples format, disables checks (default: {False})
+
+        Raises:
+            ValueError: Wrong input
+
+        Returns:
+            (attestation, errored keys, key_list) -- []
+
+        """  # noqa: E501
         if not embed:
             key_list = [
                  _extract_hash_key(x, algo) for x in key_list
@@ -175,7 +185,7 @@ class AttestationChecker(object):
         if not attestation and algo:
             attestation = cls.calc_attestation(key_list, algo, embed=True)
         elif isinstance(attestation, str):
-            attestation = base64.urlsafe_b64decode(attestation)
+            attestation = base64.b64decode(attestation)
         elif not attestation:
             raise ValueError("Provide either attestation or hash algo")
         errored = []
@@ -185,7 +195,7 @@ class AttestationChecker(object):
                 hashalgo, signature = entry[2].split("=", 1)
                 hashalgo = getattr(hashes, hashalgo.upper())()
                 key.verify(
-                    base64.urlsafe_b64decode(signature),
+                    base64.b64decode(signature),
                     attestation,
                     padding.PSS(
                         mgf=padding.MGF1(hashalgo),
@@ -230,7 +240,7 @@ class AttestationChecker(object):
             len(key_list) == 0 or \
             isinstance(key_list[0], KeyTriple)
         if isinstance(attestation, str):
-            attestation = base64.urlsafe_b64decode(attestation)
+            attestation = base64.b64decode(attestation)
         elif not attestation and algo:
             attestation = self.calc_attestation(key_list, algo, embed=True)
         if _cur:
@@ -289,7 +299,7 @@ class AttestationChecker(object):
             isinstance(key_list[0], KeyTriple)
         only_hashes = set(map(lambda x: x[0], key_list))
         if isinstance(attestation, str):
-            attestation = base64.urlsafe_b64decode(attestation)
+            attestation = base64.b64decode(attestation)
         elif not attestation and algo:
             attestation = self.calc_attestation(key_list, algo, embed=True)
 

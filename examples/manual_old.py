@@ -21,7 +21,7 @@ from spkcspider.utils.urls import merge_get_url, replace_action
 
 from spider_messaging.constants import AttestationResult, MessageType
 from spider_messaging.protocols.attestation import AttestationChecker
-from spider_messaging.utils.graph import analyse_dest, analyze_src, get_pages
+from spider_messaging.utils.graph import get_postboxes, get_pages
 from spider_messaging.utils.keys import load_priv_key
 from spider_messaging.utils.misc import EncryptedFile
 
@@ -96,16 +96,16 @@ send_parser.add_argument(
 
 
 def action_send(argv, priv_key, pub_key_hash, src_keys, session, g_src):
-    component_uriref, src_options = analyze_src(g_src)
-    if not component_uriref:
+    postboxes = get_postboxes(g_src)
+    if len(postboxes) != 1:
         parser.exit(1, "Source cannot create messages, logged in?")
+    component_uriref, src_options = next(postboxes.items())
 
     dest_url = merge_get_url(argv.dest, raw="embed", search="_type=PostBox")
     response_dest = session.get(dest_url)
     if not response_dest.ok:
         logger.info("Dest returned error: %s", response_dest.text)
         parser.exit(1, "retrieval failed, invalid url?\n")
-    dest = {}
     g_dest = Graph()
     g_dest.parse(data=response_dest.content, format="turtle")
     for page in get_pages(g_dest):
@@ -114,15 +114,20 @@ def action_send(argv, priv_key, pub_key_hash, src_keys, session, g_src):
         ) as response:
             response.raise_for_status()
             g_dest.parse(data=response.content, format="turtle")
-    dest_postbox_url, webref_url, dest, dest_hash_algo, attestation = \
-        analyse_dest(g_dest)
+    dest_postboxes = get_postboxes(g_dest)
+    if len(dest_postboxes) != 1:
+        parser.exit(1, "Dest has no/too many postboxes")
+    dest_postbox_url, dest_options = next(dest_postboxes.items())
+    webref_url = replace_action(dest_postbox_url, "push_webref/")
+    dest_hash_algo = dest_options["hash_algorithm"]
+    attestation = dest_options["attestation"]
 
     bdomain = dest_postbox_url.split("?", 1)[0]
     result_dest, _, dest_keys = argv.attestation.check(
         bdomain,
         map(
             lambda x: (x["key"], x["signature"]),
-            dest.values()
+            dest_options["signatures"].values()
         ), attestation=attestation,
         algo=dest_hash_algo
     )
@@ -161,7 +166,7 @@ def action_send(argv, priv_key, pub_key_hash, src_keys, session, g_src):
             # encrypt decryption key
             src_key_list[
                 "%s=%s" % (argv.src_hash_algo.name, k[0].hex())
-            ] = base64.urlsafe_b64encode(enc).decode("ascii")
+            ] = base64.b64encode(enc).decode("ascii")
     else:
         enc = priv_key.public_key().encrypt(
             aes_key,
@@ -173,7 +178,7 @@ def action_send(argv, priv_key, pub_key_hash, src_keys, session, g_src):
         # encrypt decryption key
         src_key_list[
             "%s=%s" % (argv.src_hash_algo.name, pub_key_hash)
-        ] = base64.urlsafe_b64encode(enc).decode("ascii")
+        ] = base64.b64encode(enc).decode("ascii")
 
     for k in dest_keys:
         enc = k[1].encrypt(
@@ -186,7 +191,7 @@ def action_send(argv, priv_key, pub_key_hash, src_keys, session, g_src):
         # encrypt decryption key
         dest_key_list[
             "%s=%s" % (dest_hash_algo.name, k[0].hex())
-        ] = base64.urlsafe_b64encode(enc).decode("ascii")
+        ] = base64.b64encode(enc).decode("ascii")
     headers = b"SPKC-Type: %b\n" % MessageType.file
 
     # remove raw as we parse html
@@ -338,7 +343,7 @@ def action_view(argv, priv_key, pem_public, own_url, session, g_message):
         if not key:
             parser.exit(0, "message not for me\n")
         decrypted_key = priv_key.decrypt(
-            base64.urlsafe_b64decode(key),
+            base64.b64decode(key),
             padding.OAEP(
                 mgf=padding.MGF1(algorithm=argv.src_hash_algo),
                 algorithm=argv.src_hash_algo,
@@ -482,7 +487,7 @@ def action_check(argv, priv_key, pub_key_hash, session, g):
 
         }
     ))
-    if base64.urlsafe_b64decode(tmp[0][0].value) != src_activator_value:
+    if base64.b64decode(tmp[0][0].value) != src_activator_value:
         return "activator doesn't match shown activator"
     if errored:
         pub_key_hash_bin = bytes.fromhex(pub_key_hash)
@@ -546,7 +551,7 @@ def action_check(argv, priv_key, pub_key_hash, session, g):
                                 f"{argv.src_hash_algo.name}={key[0].hex()}",
                             "signature": "{}={}".format(
                                 argv.src_hash_algo.name,
-                                base64.urlsafe_b64encode(
+                                base64.b64encode(
                                     signature
                                 ).decode("ascii")
                             )

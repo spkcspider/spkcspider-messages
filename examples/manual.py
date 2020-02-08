@@ -130,7 +130,7 @@ def action_check(argv):
 
 def action_sign(argv):
     try:
-        argv.post_box.sign()
+        argv.post_box.sign(True)
     except Exception as exc:
         raise exc
 
@@ -180,15 +180,15 @@ def main(argv):
             parser.exit(1, "invalid key: %s\n" % argv.key)
 
     if argv.action == "send":
-        argv.post_box = PostBox(argv.url, priv_key)
+        argv.post_box = PostBox(argv.attestation, priv_key, argv.url)
         return action_send(argv)
     elif argv.action in {"view", "peek"}:
-        argv.post_box = PostBox(argv.url, priv_key)
+        argv.post_box = PostBox(argv.attestation, priv_key, argv.url)
         return action_view(argv)
     elif argv.action == "check":
         return action_check(argv)
     elif argv.action == "sign":
-        argv.post_box = PostBox(argv.url, priv_key)
+        argv.post_box = PostBox(argv.attestation, priv_key, argv.url)
         return action_sign(argv)
 
 

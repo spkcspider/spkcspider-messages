@@ -17,19 +17,19 @@ from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from rdflib import XSD, Graph, Literal
 from spkcspider.constants import spkcgraph
-from spkcspider.exceptions import (
-    CheckError, DestException, NotReady, SrcException, ValidationError,
-    WrongRecipient
-)
-from spkcspider.utils.misc import EncryptedFile
 from spkcspider.utils.urls import merge_get_url, replace_action
 
 from spider_messaging.constants import (
-    AccessMethod, AttestationResult, MessageType, SendType
+    AccessMethod, AttestationResult, MessageType, SendMethod
 )
-from spider_messaging.utils.graph import analyse_dest, get_hash, get_pages
+from spider_messaging.exceptions import (
+    CheckError, DestException, NotReady, SrcException, ValidationError,
+    WrongRecipient
+)
+from spider_messaging.utils.graph import get_pages, get_postboxes
+from spider_messaging.utils.misc import EncryptedFile
 
-from . import AttestationChecker
+from spider_messaging.protocols.attestation import AttestationChecker
 
 logger = logging.getLogger(__name__)
 
@@ -98,42 +98,21 @@ class PostBox(object):
             ) as response:
                 response.raise_for_status()
                 graph.parse(data=response.content, format="turtle")
-        src = {}
-        for i in graph.query(
-            """
-                SELECT
-                ?postbox ?postbox_value ?key_name ?key_value
-                WHERE {
-                    ?postbox spkc:properties ?property .
-                    ?property spkc:name ?postbox_name ;
-                              spkc:value ?postbox_value .
-                    ?postbox_value spkc:properties ?key_base_prop .
-                    ?key_base_prop spkc:name ?key_name ;
-                                   spkc:value ?key_value .
-                }
-            """,
-            initNs={"spkc": spkcgraph},
-            initBindings={
-                "postbox_name": Literal(
-                    "signatures", datatype=XSD.string
-                )
-            }
-        ):
-            url = str(i.postbox)
-            value = str(i.postbox_value)
-            src.setdefault(url, {})
-            src[url].setdefault(value, {})
-            src[url][value][str(i.key_name)] = i.key_value
-        if not self.url:
-            if len(src) != 1:
-                raise ValueError("No postbox found/more than one found")
-            self.url, src = list(src.items())[0]
-        else:
-            src = src[self.url]
 
-        self.hash_algo = getattr(
-            hashes, next(iter(src.values()))["hash_algorithm"].upper()
-        )()
+        postboxes = get_postboxes(graph)
+
+        if len(postboxes) != 1:
+            if not self.url:
+                raise SrcException("No postbox found/more than one found")
+            else:
+                try:
+                    options = postboxes[self.url]
+                except Exception:
+                    raise SrcException("No postbox found/more than one found")
+        else:
+            self.url, options = next(iter(postboxes.items()))
+
+        self.hash_algo = options["hash_algorithm"]
 
         digest = hashes.Hash(self.hash_algo, backend=default_backend())
         digest.update(self.pem_key_public)
@@ -142,7 +121,7 @@ class PostBox(object):
             self.attestation_checker.check_signatures(
                 map(
                     lambda x: (x["key"], x["signature"]),
-                    src.values()
+                    options["signatures"].values()
                 ),
                 algo=self.hash_algo
             )
@@ -182,8 +161,14 @@ class PostBox(object):
                     g_dest.parse(data=response.content, format="turtle")
         except Exception as exc:
             raise DestException("postbox retrieval failed") from exc
-        dest_postbox_url, webref_url, dest, dest_hash_algo, attestation = \
-            analyse_dest(g_dest)
+
+        dest_postboxes = get_postboxes(g_dest)
+        if len(dest_postboxes) != 1:
+            raise DestException("No postbox found/more than one found")
+        dest_postbox_url, dest_options = next(iter(dest_postboxes.items()))
+        webref_url = replace_action(dest_postbox_url, "push_webref/")
+        dest_hash_algo = dest_options["hash_algorithm"]
+        attestation = dest_options["attestation"]
 
         bdomain = dest_postbox_url.split("?", 1)[0]
         result_dest, _, dest_keys = self.attestation_checker.check(
@@ -218,7 +203,7 @@ class PostBox(object):
             # encrypt decryption key
             dest_key_list[
                 "%s=%s" % (dest_hash_algo.name, k[0].hex())
-            ] = base64.urlsafe_b64encode(enc).decode("ascii")
+            ] = base64.b64encode(enc).decode("ascii")
 
         response_dest = self.session.post(
             webref_url, data={
@@ -232,7 +217,8 @@ class PostBox(object):
             raise DestException("post webref failed") from exc
 
     def send(
-        self, inp, receivers, headers=b"\n", mode=SendType.shared, aes_key=None
+        self, inp, receivers, headers=b"\n", mode=SendMethod.shared,
+        aes_key=None
     ):
         if not self.ok:
             raise NotReady()
@@ -255,9 +241,9 @@ class PostBox(object):
             backend=default_backend()
         ).encryptor()
         src_key_list = {}
-        if mode == SendType.stealth:
+        if mode == SendMethod.stealth:
             pass
-        elif mode == SendType.private:
+        elif mode == SendMethod.private:
             enc = self.priv_key.public_key().encrypt(
                 aes_key,
                 padding.OAEP(
@@ -268,8 +254,8 @@ class PostBox(object):
             # encrypt decryption key
             src_key_list[
                 "%s=%s" % (self.hash_algo.name, self.pub_key_hash)
-            ] = base64.urlsafe_b64encode(enc).decode("ascii")
-        elif mode == SendType.shared:
+            ] = base64.b64encode(enc).decode("ascii")
+        elif mode == SendMethod.shared:
             for k in self.client_list:
                 enc = k[1].encrypt(
                     aes_key,
@@ -281,7 +267,7 @@ class PostBox(object):
                 # encrypt decryption key
                 src_key_list[
                     "%s=%s" % (self.hash_algo.name, k[0].hex())
-                ] = base64.urlsafe_b64encode(enc).decode("ascii")
+                ] = base64.b64encode(enc).decode("ascii")
         else:
             raise NotImplementedError()
 
@@ -476,7 +462,7 @@ class PostBox(object):
         if not key:
             raise WrongRecipient("message not for me")
         decrypted_key = self.priv_key.decrypt(
-            base64.urlsafe_b64decode(key),
+            base64.b64decode(key),
             padding.OAEP(
                 mgf=padding.MGF1(algorithm=hash_algo),
                 algorithm=hash_algo,
@@ -582,7 +568,7 @@ class PostBox(object):
     ):
         if isinstance(url_or_graph, Graph):
             graph = url_or_graph
-            assert checker and url
+            assert not checker or url
         else:
             url = url or url_or_graph
             if not session:
@@ -604,74 +590,48 @@ class PostBox(object):
                 )
                 response.raise_for_status()
                 graph.parse(data=response.content, format="turtle")
-        src = {}
-        for i in graph.query(
-            """
-                SELECT
-                ?postbox ?key_name ?key_value
-                WHERE {
-                    ?postbox spkc:properties ?property .
-                    ?property spkc:name ?postbox_name ;
-                            spkc:value ?postbox_value .
-                    ?postbox_value spkc:properties ?key_base_prop .
-                    ?key_base_prop spkc:name ?key_name ;
-                                spkc:value ?key_value .
-                }
-            """,
-            initNs={"spkc": spkcgraph},
-            initBindings={
-                "postbox_name": Literal(
-                    "signatures", datatype=XSD.string
-                )
-            }
-        ):
-            value = str(i.postbox_value)
-            src.setdefault(value, {})
-            src[value][str(i.key_name)] = i.key_value
+        postboxes = get_postboxes(graph)
 
-        try:
-            hash_algo = get_hash(graph)
-        except Exception as exc:
-            raise CheckError("Hash algorithm not found") from exc
-        try:
-            a_found = list(graph.query(
-                """
-                    SELECT DISTINCT ?value
-                    WHERE {
-                        ?base spkc:name ?name .
-                        ?base spkc:value ?value .
-                    }
-                """,
-                initNs={"spkc": spkcgraph},
-                initBindings={
-                    "name": Literal(
-                        "attestation", datatype=XSD.string
-                    ),
+        if len(postboxes) != 1:
+            raise CheckError("No postbox found/more than one found")
 
-                }
-            ))[0][0].toPython()
-        except Exception as exc:
-            raise CheckError() from exc
+        postbox, options = next(iter(postboxes.items()))
+
+        if not isinstance(options.get("hash_algorithm"), hashes.HashAlgorithm):
+            raise CheckError("Hash algorithm not found")
+        if not isinstance(options.get("attestation"), bytes):
+            raise CheckError("Attestation not found/wrong type")
         errors, key_list = AttestationChecker.check_signatures(
             map(
                 lambda x: (x["key"], x["signature"]),
-                src.values()
+                options["signatures"].values()
             ),
-            attestation=a_found
+            attestation=options["attestation"],
+            algo=options["hash_algorithm"]
         )[1:]
         if errors:
-            raise CheckError("Missmatch shown attestation with signatures")
+            raise CheckError("Missmatch attestation with signatures", *errors)
         if not checker:
-            return AttestationResult.success, [], key_list, a_found
+            return {
+                "result": AttestationResult.success,
+                "errors": [],
+                "key_list": key_list,
+                **options
+            }
         url = url.split("?", 1)[0]
         ret = checker.check(
             url,
             key_list,
-            algo=hash_algo, auto_add=auto_add, embed=True
+            algo=options["hash_algorithm"], auto_add=auto_add, embed=True
         )
         if ret[0] == AttestationResult.error:
             raise CheckError("Validation failed")
-        return *ret, a_found
+        return {
+            "result": ret[0],
+            "errors": ret[1],
+            "key_list": key_list,
+            **options
+        }
 
     def check(self, url=None):
         if not url or url == self.url:
@@ -712,27 +672,23 @@ class PostBox(object):
                 response.raise_for_status()
                 graph.parse(data=response.content, format="turtle")
         if not url or url == self.url:
-            try:
-                if self.hash_algo != get_hash(graph):
-                    raise CheckError("Hash algorithm changed")
-            except Exception as exc:
-                raise CheckError("Hash not found") from exc
-            self.state, errored, self.client_list, _ = \
+            result = \
                 self.simple_check(
                     graph,
                     url=url, checker=self.attestation_checker,
                     auto_add=True
                 )
-
-            return self.state, errored, self.client_list
+            self.state = result["result"]
+            self.client_list = result["key_list"]
+            return result
         else:
             return self.simple_check(
                 graph,
                 url=url, checker=self.attestation_checker,
                 auto_add=True
-            )[:3]
+            )
 
-    def sign(self):
+    def sign(self, confirm=False):
         postbox_update = replace_action(
             self.url, "update/"
         )
@@ -748,18 +704,10 @@ class PostBox(object):
             predicate=spkcgraph["csrftoken"])
         )[0].toPython()
 
-        try:
-            if self.hash_algo != get_hash(graph):
-                raise CheckError("Hash algorithm changed")
-        except Exception as exc:
-            raise CheckError("Hash not found") from exc
+        check_result = self.simple_check(graph, url=self.url)
 
-        try:
-            result, errors, key_list, attestation = self.simple_check(graph)
-        except CheckError as exc:
-            raise ValidationError(
-                "activator doesn't match shown activator"
-            ) from exc
+        if not confirm:
+            return check_result["key_list"]
 
         fields = dict(map(
             lambda x: (x[0].toPython(), x[1].toPython()),
@@ -782,7 +730,7 @@ class PostBox(object):
             else:
                 # currently only one priv key is supported
                 signature = self.priv_key.sign(
-                    attestation,
+                    check_result["attestation"],
                     padding.PSS(
                         mgf=padding.MGF1(self.hash_algo),
                         salt_length=padding.PSS.MAX_LENGTH
@@ -795,7 +743,7 @@ class PostBox(object):
                         "hash": f"{self.hash_algo.name}={key[0].hex()}",
                         "signature": "{}={}".format(
                             self.hash_algo.name,
-                            base64.urlsafe_b64encode(
+                            base64.b64encode(
                                 signature
                             ).decode("ascii")
                         )
@@ -814,6 +762,7 @@ class PostBox(object):
             response.raise_for_status()
         except Exception as exc:
             raise SrcException("could not update signature") from exc
+        return check_result["key_list"]
 
     @property
     def ok(self):
