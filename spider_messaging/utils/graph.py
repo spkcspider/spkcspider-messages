@@ -38,6 +38,8 @@ def get_pages(graph):
 
 
 def map_hashes(graph):
+    raise NotImplemented
+    # TODO: calculate via key objects
     return dict(map(
         lambda x: (x.pub_hash, x.norm_hash),
         graph.query(
