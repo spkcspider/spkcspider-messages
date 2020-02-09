@@ -81,7 +81,7 @@ send_parser.add_argument(
 
 def action_send(argv):
     try:
-        aes_key, tokens, exceptions = argv.post_box.send(
+        exceptions, tokens, aes_key = argv.post_box.send(
             argv.file,
             receivers=argv.dest,
             headers=b"SPKC-Type: %b\n" % MessageType.file

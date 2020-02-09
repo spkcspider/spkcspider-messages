@@ -197,11 +197,15 @@ class WebReference(DataContent):
             max_size = kwargs["request"].POST.get("max_size") or math.inf
             if isinstance(max_size, str):
                 max_size = int(max_size)
-            max_size = min(
-                self.associated.user_info.get_free_space("remote"),
+            max_configured_size = \
                 self.associated.attached_to_content.content.free_data.get(
                     "max_receive_size", math.inf
-                ),
+                )
+            if max_configured_size is None:
+                max_configured_size = math.inf
+            max_size = min(
+                self.associated.user_info.get_free_space("remote"),
+                max_configured_size,
                 max_size
             )
             params, inline_domain = get_requests_params(self.quota_data["url"])

@@ -73,7 +73,7 @@ class PostBox(object):
         if self.merge_instead_x_token:
             return merge_get_url(_url, token=self.token, **kwargs), {}
         return (
-            merge_get_url(_url, token=self.token, **kwargs),
+            merge_get_url(_url, **kwargs),
             {"X-TOKEN": self.token or ""}
         )
 
@@ -381,7 +381,7 @@ class PostBox(object):
                 exceptions.append(exc)
                 # for autoremoval simulate access
                 self.session.get(furl)
-        return aes_key, tokens, exceptions
+        return exceptions, tokens, aes_key
 
     def receive(
         self, message_id, outfp=None, access_method=AccessMethod.view,
@@ -486,7 +486,9 @@ class PostBox(object):
         retrieve_url, headers = self.merge_and_headers(
             replace_action(
                 result[0].base,
-                "bypass/" if access_method == AccessMethod.view else "message/"
+                "bypass/" if (
+                    access_method == AccessMethod.bypass
+                ) else "message/"
             )
         )
         data = {}
