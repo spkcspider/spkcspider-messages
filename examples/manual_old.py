@@ -108,7 +108,7 @@ def action_send(argv, priv_key, pub_key_hash, src_keys, session, g_src):
         parser.exit(1, "retrieval failed, invalid url?\n")
     g_dest = Graph()
     g_dest.parse(data=response_dest.content, format="turtle")
-    for page in get_pages(g_dest):
+    for page in get_pages(g_dest)[1]:
         with session.get(
             merge_get_url(dest_url, page=page)
         ) as response:
@@ -642,7 +642,7 @@ def main(argv):
 
         g = Graph()
         g.parse(data=response.content, format="turtle")
-        for page in get_pages(g):
+        for page in get_pages(g)[1]:
             with s.get(
                 merge_get_url(own_url, page=page), headers={
                     "X-TOKEN": argv.token

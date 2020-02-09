@@ -77,6 +77,44 @@ class PostBox(object):
             {"X-TOKEN": self.token or ""}
         )
 
+    def retrieve_missing(self, graph, url=None, timeout=60):
+        tmp = get_pages(graph)
+        if not url:
+            url = tmp[0]
+        if url.startswith(self.url):
+            merged_url, headers = self.merge_and_headers(
+                url
+            )
+        else:
+            merged_url = url
+            headers = {}
+        for page in tmp[1]:
+            with self.session.get(
+                merge_get_url(merged_url, page=page), headers=headers,
+                timeout=timeout
+            ) as response:
+                response.raise_for_status()
+                graph.parse(data=response.content, format="turtle")
+
+    def get_filtered_graph(self, url=None):
+        if not url or url == self.url:
+            merged_url, headers = self.merge_and_headers(
+                self.url, raw="embed", search="_type=PostBox"
+            )
+        else:
+            merged_url = merge_get_url(
+                url, raw="embed", search="_type=PostBox"
+            )
+            headers = {}
+        response = self.session.get(
+            merged_url,
+            headers=headers
+        )
+        response.raise_for_status()
+        graph = Graph()
+        graph.parse(data=response.content, format="turtle")
+        return graph
+
     def update(self, token=None, graph=None, session=None):
         if session:
             self.session = session
@@ -84,38 +122,17 @@ class PostBox(object):
             self.session = requests.Session()
         if token:
             self.token = token
-        params = {}
+        self.merge_instead_x_token = False
         if not graph:
             assert self.url
-            params = {
-                "raw": "embed",
-                "search": "_type=PostBox"
-            }
-            self.merge_instead_x_token = False
-            for _ in range(2):
-                merged_url, headers = self.merge_and_headers(
-                    self.url, **params
-                )
-                response = self.session.get(
-                    merged_url,
-                    headers=headers
-                )
-                if response.ok:
-                    break
-                else:
-                    self.merge_instead_x_token = True
-            response.raise_for_status()
-            graph = Graph()
-            graph.parse(data=response.content, format="turtle")
-        for page in get_pages(graph):
-            merged_url, headers = self.merge_and_headers(
-                self.url, page=page, **params
-            )
-            with self.session.get(
-                merged_url, headers=headers
-            ) as response:
-                response.raise_for_status()
-                graph.parse(data=response.content, format="turtle")
+            try:
+                graph = self.get_filtered_graph(self.url)
+            except Exception:
+                self.merge_instead_x_token = True
+                graph = self.get_filtered_graph(self.url)
+            self.retrieve_missing(graph, self.url)
+        else:
+            self.retrieve_missing(graph)
 
         postboxes = get_postboxes(graph)
 
@@ -175,12 +192,7 @@ class PostBox(object):
             response_dest.raise_for_status()
             g_dest = Graph()
             g_dest.parse(data=response_dest.content, format="turtle")
-            for page in get_pages(g_dest):
-                with self.session.get(
-                    merge_get_url(dest_url, page=page), timeout=60
-                ) as response:
-                    response.raise_for_status()
-                    g_dest.parse(data=response.content, format="turtle")
+            self.retrieve_missing(g_dest, dest_url)
         except Exception as exc:
             raise DestException("postbox retrieval failed") from exc
 
@@ -373,15 +385,17 @@ class PostBox(object):
             raise SrcException("Message creation failed", response.text)
         fetch_url = fetch_url[0].toPython()
         exceptions = []
+        final_fetch_urls = []
         for receiver, token in zip(receivers, tokens):
             furl = merge_get_url(fetch_url, token=token.toPython())
             try:
                 self._send_dest(aes_key, furl, receiver)
+                final_fetch_urls.append(furl)
             except Exception as exc:
                 exceptions.append(exc)
                 # for autoremoval simulate access
                 self.session.get(furl)
-        return exceptions, tokens, aes_key
+        return exceptions, final_fetch_urls, aes_key
 
     def receive(
         self, message_id, outfp=None, access_method=AccessMethod.view,
@@ -401,13 +415,7 @@ class PostBox(object):
         response.raise_for_status()
         graph = Graph()
         graph.parse(data=response.content, format="turtle")
-        for page in get_pages(graph):
-            with self.session.get(
-                merge_get_url(merged_url, page=page),
-                headers=headers
-            ) as response:
-                response.raise_for_status()
-                graph.parse(data=response.content, format="turtle")
+        self.retrieve_missing(graph, merged_url)
         result = list(graph.query(
             """
                 SELECT DISTINCT ?base ?hash_algorithm ?type
@@ -614,37 +622,39 @@ class PostBox(object):
 
     @staticmethod
     def simple_check(
-        url_or_graph, session=None, url=None, checker=None, auto_add=False,
+        url_or_graph, session=None, checker=None, auto_add=False,
         token=None
     ):
         if isinstance(url_or_graph, Graph):
             graph = url_or_graph
-            assert not checker or url
+            retrieve_url, pages = get_pages(graph)
+            url = retrieve_url.split("?", 1)[0]
         else:
-            url = url or url_or_graph
+            url = url_or_graph
+            retrieve_url = merge_get_url(
+                url_or_graph, raw="embed", search="_type=PostBox"
+            )
             if not session:
                 session = requests.Session()
             response = session.get(
-                merge_get_url(
-                    url_or_graph, raw="embed", search="_type=PostBox"
-                ), headers={
+                retrieve_url, headers={
                     "X-TOKEN": token or ""
                 }
             )
             response.raise_for_status()
             graph = Graph()
             graph.parse(data=response.content, format="turtle")
-            for page in get_pages(graph):
-                response = session.get(
-                    merge_get_url(
-                        url_or_graph, raw="embed", search="_type=PostBox",
-                        page=page
-                    ), headers={
-                        "X-TOKEN": token or ""
-                    }
-                )
-                response.raise_for_status()
-                graph.parse(data=response.content, format="turtle")
+            pages = get_pages(graph)[1]
+        for page in pages:
+            response = session.get(
+                merge_get_url(
+                    retrieve_url, page=page
+                ), headers={
+                    "X-TOKEN": token or ""
+                }
+            )
+            response.raise_for_status()
+            graph.parse(data=response.content, format="turtle")
         postboxes = get_postboxes(graph)
 
         if len(postboxes) != 1:

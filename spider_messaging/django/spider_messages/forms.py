@@ -83,7 +83,7 @@ class PostBoxForm(DataContentForm):
     setattr(hash_algorithm, "hashable", False)
     signatures = JsonField(
         widget=SignatureWidget(
-            item_label=_("Signature")
+            item_label=_("Signature"), hash_label=_("Hash")
         )
     )
     setattr(signatures, "hashable", False)

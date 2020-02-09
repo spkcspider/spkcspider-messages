@@ -21,7 +21,9 @@ class SignatureWidget(widgets.Textarea):
         ]
 
     def __init__(
-        self, *, attrs=None, wrapper_attrs=None, item_label=_("Item"), **kwargs
+        self, *, attrs=None, wrapper_attrs=None, item_label=_("Item"),
+        hash_label=_("Hash"),
+        **kwargs
     ):
         if not attrs:
             attrs = {"class": ""}
@@ -32,6 +34,8 @@ class SignatureWidget(widgets.Textarea):
         attrs["class"] += " SignatureEditorTarget"
         # don't access them as they are lazy evaluated
         attrs["data-item_label"] = item_label
+        attrs["data-hash_label"] = hash_label
+        attrs["data-signature_label"] = _("Signature")
         wrapper_attrs["style"] += " width:100%"
         self.wrapper_attrs = wrapper_attrs.copy()
         super().__init__(attrs=attrs, **kwargs)

@@ -4,9 +4,21 @@ document.addEventListener("DOMContentLoaded", function(){
   for (let counter=0;counter<collection.length;counter++){
     let element = collection[counter];
     let ilabel = "Item";
+    let hlabel = "Hash";
+    let slabel = "Signature";
     try{
       ilabel = element.dataset.item_label;
     } catch(e){
+      console.log(e);
+    }
+    try {
+      hlabel = element.dataset.hash_label;
+    } catch (e) {
+      console.log(e);
+    }
+    try {
+      slabel = element.dataset.signature_label;
+    } catch (e) {
       console.log(e);
     }
     let editor = new JSONEditor(document.getElementById(`${element.id}_inner_wrapper`), {
@@ -35,6 +47,7 @@ document.addEventListener("DOMContentLoaded", function(){
           "properties": {
             "hash": {
               "type": "string",
+              "title": hlabel,
               "readonly": true,
               "options": {
                 "inputAttributes": {
@@ -44,6 +57,7 @@ document.addEventListener("DOMContentLoaded", function(){
             },
             "signature": {
               "type": "string",
+              "title": slabel,
               "format": "textarea",
               "options": {
                 "inputAttributes": {
