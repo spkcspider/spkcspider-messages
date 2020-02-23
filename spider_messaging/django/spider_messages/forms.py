@@ -1,11 +1,15 @@
-__all__ = ["ReferenceForm", "PostBoxForm", "MessageForm"]
+__all__ = ["ReferenceForm", "PostBoxForm", "MessageForm", "AddressForm"]
 
 import base64
 import binascii
 import json
+import os
 import re
 
+from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from django import forms
 from django.conf import settings
 from django.urls import reverse
@@ -19,8 +23,8 @@ from spkcspider.apps.spider.models import (
     AssignedContent, AttachedFile, AuthToken, SmartTag
 )
 from spkcspider.apps.spider.queryfilters import info_or
-from spkcspider.utils.security import get_hashob
 from spkcspider.constants import spkcgraph
+from spkcspider.utils.security import get_hashob
 
 from .widgets import SignatureWidget
 
@@ -35,11 +39,12 @@ class PostBoxForm(DataContentForm):
     setattr(max_receive_size, "hashable", False)
     only_persistent = forms.BooleanField(required=False)
     setattr(only_persistent, "hashable", False)
+    # TODO: functionality, currently nothing logically. Cleanup
     shared = forms.BooleanField(required=False, initial=True)
     setattr(shared, "hashable", False)
     keys = ContentMultipleChoiceField(
         queryset=AssignedContent.objects.filter(
-            ctype__name="PublicKey"
+            info__contains="\x1etype=PublicKey\x1e"
         ).filter(
             info__contains="\x1epubkeyhash="
         ), to_field_name="id",
@@ -372,7 +377,7 @@ class MessageForm(DataContentForm):
             self.initial["tokens"] = \
                 [
                     token.token
-                    for token in self.instance.associated.attachedtokens.all()
+                    for token in self.instance.associated.attached_tokens.all()
             ]
             # hack around for current bad default JsonField widget
             self.initial["key_list"] = json.dumps(self.initial["key_list"])
@@ -523,7 +528,7 @@ class MessageForm(DataContentForm):
             # update own references to add messagecontent
             #   without updating PostBox
             ret["referenced_by"] = self.instance.associated.attached_to_content
-            ret["attachedtokens"] = [
+            ret["attached_tokens"] = [
                 AuthToken(
                     persist=0,
                     usercomponent=self.instance.associated.usercomponent,
@@ -536,7 +541,7 @@ class MessageForm(DataContentForm):
                 ) for _ in range(self.cleaned_data.get("amount_tokens", 1))
             ]
             # self.initial["tokens"] = [
-            #     x.token for x in ret["attachedtokens"]
+            #     x.token for x in ret["attached_tokens"]
             # ]
         if "encrypted_content" in self.changed_data:
             f = None
@@ -551,4 +556,92 @@ class MessageForm(DataContentForm):
                 )
             f.file = self.cleaned_data["encrypted_content"]
             ret["attachedfiles"] = [f]
+        return ret
+
+
+class AddressForm(DataContentForm):
+    name = forms.CharField()
+    setattr(
+        name, "spkc_datatype", XSD.base64Binary
+    )
+    url = forms.CharField()
+    setattr(
+        url, "spkc_datatype", XSD.base64Binary
+    )
+    nonce = forms.CharField(
+        widget=forms.HiddenInput(),
+        required=False, initial=""
+    )
+    setattr(
+        nonce, "spkc_datatype", XSD.base64Binary
+    )
+    key_list = JsonField(
+        initial=None, required=False
+    )
+
+    quota_fields = {
+        "name": "",
+        "url": "",
+        "nonce": None,
+        "key_list": {}
+    }
+
+    def clean(self):
+        ret = super().clean()
+        if not self.cleaned_data.get("nonce"):
+            keys = self.instance.usercomponent.contents.filter(
+                ctype__name="PublicKey",
+                info__contains="\x1epubkeyhash="
+            ).exclude(
+                info__contains="\x1ethirdparty\x1e"
+            )
+            if not keys:
+                raise forms.ValidationError(
+                    _(
+                        "No keys found and no keys specified"
+                    )
+                )
+            aes_key = os.urandom(32)
+            self.cleaned_data["nonce"] = os.urandom(13)
+            cipher = Cipher(
+                algorithms.AES(aes_key),
+                modes.GCM(self.cleaned_data["nonce"]),
+                backend=default_backend()
+            )
+            self.cleaned_data["name"] = \
+                base64.b64encode(cipher.encryptor().update(
+                    self.cleaned_data["name"].encode("utf8")
+                ))
+            self.cleaned_data["url"] = \
+                base64.b64encode(cipher.encryptor().update(
+                    self.cleaned_data["url"].encode("utf8")
+                ))
+            self.cleaned_data["key_list"] = {}
+            for key in keys:
+                k = key.content.get_key_ob()
+                if k:
+                    algo_hash = key.getlist("pubkeyhash", amount=1)[0]
+                    algo = getattr(
+                        hashes, algo_hash.split("=", 1)[0].upper()
+                    )()
+                    enc = k.encrypt(
+                        aes_key,
+                        padding.OAEP(
+                            mgf=padding.MGF1(algorithm=algo),
+                            algorithm=self.hash_algo, label=None
+                        )
+                    )
+                    self.cleaned_data["key_list"][
+                        algo_hash
+                    ] = base64.b64encode(enc).decode("ascii")
+
+        if not self.cleaned_data.get("key_list"):
+            self.add_error(
+                None, forms.ValidationError(
+                    _(
+                        "key_list is missing: either specify complete "
+                        "or leave nonce out"
+                    )
+                )
+            )
         return ret

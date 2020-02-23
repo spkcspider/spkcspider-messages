@@ -101,7 +101,9 @@ def action_send(argv, priv_key, pub_key_hash, src_keys, session, g_src):
         parser.exit(1, "Source cannot create messages, logged in?")
     component_uriref, src_options = next(postboxes.items())
 
-    dest_url = merge_get_url(argv.dest, raw="embed", search="_type=PostBox")
+    dest_url = merge_get_url(
+        argv.dest, raw="embed", search="\x1etype=PostBox\x1e"
+    )
     response_dest = session.get(dest_url)
     if not response_dest.ok:
         logger.info("Dest returned error: %s", response_dest.text)
@@ -221,7 +223,7 @@ def action_send(argv, priv_key, pub_key_hash, src_keys, session, g_src):
         },
         files={
             "encrypted_content": EncryptedFile(
-                fencryptor, nonce, argv.file, headers
+                fencryptor, argv.file, nonce, headers
             )
         }
     )
@@ -361,6 +363,7 @@ def action_view(argv, priv_key, pem_public, own_url, session, g_message):
                 headblock = b"%b%b" % (headblock, chunk)
                 if b"\0" in headblock:
                     nonce, headblock = headblock.split(b"\0", 1)
+                    nonce = base64.b64decode(nonce)
                     fdecryptor = Cipher(
                         algorithms.AES(decrypted_key),
                         modes.GCM(nonce),
@@ -623,12 +626,12 @@ def main(argv):
         pem_public = priv_key.public_key().public_bytes(
             encoding=serialization.Encoding.PEM,
             format=serialization.PublicFormat.SubjectPublicKeyInfo
-        )
+        ).strip()
 
     with requests.Session() as s:
         if access == "list":
             own_url = merge_get_url(
-                argv.url, raw="embed", search="_type=PostBox"
+                argv.url, raw="embed", search="\x1etype=PostBox\x1e"
             )
         else:
             own_url = merge_get_url(argv.url, raw="embed")

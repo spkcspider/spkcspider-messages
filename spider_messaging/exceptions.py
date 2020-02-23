@@ -33,4 +33,12 @@ class NotReady(ValidationError):
 
 
 class CheckError(Exception):
-    pass
+    attestation = None
+    errored = None
+    key_list = None
+
+    def __init__(self, *args, attestation=None, errored=None, key_list=None):
+        self.attestation = attestation or None
+        self.errored = errored or []
+        self.key_list = key_list or []
+        super().__init__(*args, *map(lambda x: x[2], self.errored))

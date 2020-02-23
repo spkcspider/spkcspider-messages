@@ -5,12 +5,15 @@ import logging
 import os
 import sys
 
+from rdflib import Graph
+
 from spkcspider.constants import static_token_matcher
 
 from spider_messaging.constants import AccessMethod, MessageType
 from spider_messaging.protocols.attestation import AttestationChecker
 from spider_messaging.protocols.messaging import PostBox
 from spider_messaging.utils.keys import load_priv_key
+from spider_messaging.utils.graph import map_keys
 
 # import re
 
@@ -134,12 +137,20 @@ def action_check(argv):
 
 
 def action_sign(argv):
+    key_map, _ = map_keys(argv.initial_graph)
     try:
         required, key_list = argv.post_box.sign()
         if required:
             print("Keys in chain:")
             for i in key_list:
-                print("Key:", i[0].hex(), "(Public Key Hash)")
+                _hash = key_map[i[0]]["hash"]
+                if _hash == i[0]:
+                    print("Key:", i[0].hex())
+                else:
+                    print(
+                        "Key:", _hash.hex(), ",",
+                        i[0].hex(), "(Public Key Hash)"
+                    )
             if input("Confirm with y: ") == "y":
                 argv.post_box.sign(True)
             print("Signing successful")
@@ -190,26 +201,19 @@ def main(argv):
 
         if not priv_key:
             parser.exit(1, "invalid key: %s\n" % argv.key)
-
-    if argv.action == "send":
+    if argv.action != "check":
+        argv.initial_graph = Graph()
         argv.post_box = PostBox(
             argv.attestation, priv_key, argv.url,
-            token=argv.token
+            token=argv.token, graph=argv.initial_graph
         )
+    if argv.action == "send":
         return action_send(argv)
     elif argv.action in {"view", "peek"}:
-        argv.post_box = PostBox(
-            argv.attestation, priv_key, argv.url,
-            token=argv.token
-        )
         return action_view(argv)
     elif argv.action == "check":
         return action_check(argv)
     elif argv.action == "sign":
-        argv.post_box = PostBox(
-            argv.attestation, priv_key, argv.url,
-            token=argv.token
-        )
         return action_sign(argv)
 
 

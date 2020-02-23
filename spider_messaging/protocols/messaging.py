@@ -1,6 +1,5 @@
 __all__ = ["PostBox"]
 
-
 import base64
 import io
 import json
@@ -9,6 +8,7 @@ import os
 import tempfile
 from email import parser as emailparser
 from email import policy
+from urllib.parse import parse_qs
 
 import requests
 from cryptography.hazmat.backends import default_backend
@@ -23,13 +23,14 @@ from spider_messaging.constants import (
     AccessMethod, AttestationResult, MessageType, SendMethod
 )
 from spider_messaging.exceptions import (
-    CheckError, DestException, NotReady, SrcException, ValidationError,
-    WrongRecipient, DestSecurityException
+    CheckError, DestException, DestSecurityException, NotReady, SrcException,
+    ValidationError, WrongRecipient
 )
-from spider_messaging.utils.graph import get_pages, get_postboxes
-from spider_messaging.utils.misc import EncryptedFile
-
 from spider_messaging.protocols.attestation import AttestationChecker
+from spider_messaging.utils.graph import (
+    extract_property, get_pages, get_postboxes
+)
+from spider_messaging.utils.misc import EncryptedFile
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +50,7 @@ class PostBox(object):
     url = None
     component_url = None
     token = None
-    merge_instead_x_token = False
+    use_get_token = None
     client_list = None
     state = None
 
@@ -57,6 +58,19 @@ class PostBox(object):
         self, attestation_checker, priv_key, url=None, token=None, graph=None,
         session=None
     ):
+        """
+        [summary]
+
+        Arguments:
+            attestation_checker {[type]} -- [description]
+            priv_key {[type]} -- [description]
+
+        Keyword Arguments:
+            url {[type]} -- [description] (default: {None})
+            token {[type]} -- [description] (default: {None})
+            graph {[type]} -- empty graph: extract graph, specified graph: try to complete, None: create temp graph (default: {None})
+            session {[type]} -- [description] (default: {None})
+        """  # noqa: E501
         if isinstance(attestation_checker, AttestationChecker):
             self.attestation_checker = attestation_checker
         else:
@@ -65,74 +79,61 @@ class PostBox(object):
         self.pem_key_public = self.priv_key.public_key().public_bytes(
             encoding=serialization.Encoding.PEM,
             format=serialization.PublicFormat.SubjectPublicKeyInfo
-        )
-        self.url = url.split("?", 1)[0] if url else None
-        self.update(token, graph, session)
-
-    def merge_and_headers(self, _url, **kwargs):
-        if self.merge_instead_x_token:
-            return merge_get_url(_url, token=self.token, **kwargs), {}
-        return (
-            merge_get_url(_url, **kwargs),
-            {"X-TOKEN": self.token or ""}
-        )
-
-    def retrieve_missing(self, graph, url=None, timeout=60):
-        tmp = get_pages(graph)
-        if not url:
-            url = tmp[0]
-        if url.startswith(self.url):
-            merged_url, headers = self.merge_and_headers(
-                url
-            )
+        ).strip()
+        splitted = url.split("?", 1) if url else (None,)
+        use_get_token = None
+        if len(splitted) == 2:
+            self.url, params = splitted
+            GET = parse_qs(params)
+            if not token:
+                token = GET.get("token", None)
+                if token:
+                    use_get_token = True
         else:
-            merged_url = url
-            headers = {}
-        for page in tmp[1]:
-            with self.session.get(
-                merge_get_url(merged_url, page=page), headers=headers,
-                timeout=timeout
-            ) as response:
-                response.raise_for_status()
-                graph.parse(data=response.content, format="turtle")
+            self.url = splitted[0]
+        self.update(token, graph, session, use_get_token)
 
-    def get_filtered_graph(self, url=None):
-        if not url or url == self.url:
-            merged_url, headers = self.merge_and_headers(
-                self.url, raw="embed", search="_type=PostBox"
-            )
-        else:
-            merged_url = merge_get_url(
-                url, raw="embed", search="_type=PostBox"
-            )
-            headers = {}
-        response = self.session.get(
-            merged_url,
-            headers=headers
-        )
-        response.raise_for_status()
-        graph = Graph()
-        graph.parse(data=response.content, format="turtle")
-        return graph
-
-    def update(self, token=None, graph=None, session=None):
+    def update(
+        self, token=None, graph=None, session=None, use_get_token=None
+    ):
         if session:
             self.session = session
         elif session is False or not self.session:
             self.session = requests.Session()
         if token:
             self.token = token
-        self.merge_instead_x_token = False
+        elif use_get_token is not None:
+            # keep setting if token does not change
+            # first run: use_get_token is None so autodetect still starts
+            use_get_token = self.use_get_token
+        if use_get_token is not None:
+            self.use_get_token = use_get_token
+        else:
+            self.use_get_token = False
+        # empty graph or None
         if not graph:
             assert self.url
             try:
-                graph = self.get_filtered_graph(self.url)
-            except Exception:
-                self.merge_instead_x_token = True
-                graph = self.get_filtered_graph(self.url)
-            self.retrieve_missing(graph, self.url)
+                # replaces graph with itself if graph is specified
+                graph = self.retrieve_filtered_graph(self.url, out=graph)
+            except Exception as exc:
+                # don't retry if result is clear
+                if use_get_token is not None:
+                    raise exc
+                self.use_get_token = True
+                # replaces graph with itself if graph is specified
+                graph = self.retrieve_filtered_graph(self.url, out=graph)
+            retrieved_url = self.retrieve_missing(graph, self.url)
         else:
-            self.retrieve_missing(graph)
+            retrieved_url = self.retrieve_missing(graph)
+        if not self.token:
+            # auto retrieve token from url
+            splitted = retrieved_url.split("?", 1)
+            if len(splitted) == 2:
+                GET = parse_qs(splitted[1])
+                self.token = GET.get("token", None)
+                if GET.get("token", None):
+                    self.use_get_token = True
 
         postboxes = get_postboxes(graph)
 
@@ -183,9 +184,59 @@ class PostBox(object):
                 self.url, self.client_list, self.hash_algo, attestation=atth
             )
 
+    def merge_and_headers(self, _url, **kwargs):
+        if self.use_get_token:
+            return merge_get_url(_url, token=self.token, **kwargs), {}
+        return (
+            merge_get_url(_url, **kwargs),
+            {"X-TOKEN": self.token or ""}
+        )
+
+    def retrieve_missing(self, graph, url=None, timeout=60):
+        retrieved_url, missing_pages = get_pages(graph)
+        if not url:
+            url = retrieved_url
+        if self.url and url.startswith(self.url):
+            merged_url, headers = self.merge_and_headers(
+                url
+            )
+        else:
+            merged_url = url
+            headers = {}
+        for page in missing_pages:
+            with self.session.get(
+                merge_get_url(merged_url, page=page), headers=headers,
+                timeout=timeout
+            ) as response:
+                response.raise_for_status()
+                graph.parse(data=response.content, format="turtle")
+        return retrieved_url
+
+    def retrieve_filtered_graph(self, url=None, timeout=60, out=None):
+        if not url or url == self.url:
+            merged_url, headers = self.merge_and_headers(
+                self.url, raw="embed", search="\x1etype=PostBox\x1e"
+            )
+        else:
+            merged_url = merge_get_url(
+                url, raw="embed", search="\x1etype=PostBox\x1e"
+            )
+            headers = {}
+        response = self.session.get(
+            merged_url,
+            headers=headers, timeout=timeout
+        )
+        response.raise_for_status()
+        if out is None:
+            graph = Graph()
+        else:
+            graph = out
+        graph.parse(data=response.content, format="turtle")
+        return graph
+
     def _send_dest(self, aes_key, fetch_url, dest):
         dest_url = merge_get_url(
-            dest, raw="embed", search="_type=PostBox"
+            dest, raw="embed", search="\x1etype=PostBox\x1e"
         )
         response_dest = self.session.get(dest_url, timeout=60)
         try:
@@ -335,7 +386,7 @@ class PostBox(object):
             },
             files={
                 "encrypted_content": EncryptedFile(
-                    fencryptor, nonce, inp, headers
+                    fencryptor, inp, nonce, headers
                 )
             }
         )
@@ -537,6 +588,7 @@ class PostBox(object):
                 headblock = b"%b%b" % (headblock, chunk)
                 if b"\0" in headblock:
                     nonce, headblock = headblock.split(b"\0", 1)
+                    nonce = base64.b64decode(nonce)
                     fdecryptor = Cipher(
                         algorithms.AES(decrypted_key),
                         modes.GCM(nonce),
@@ -632,7 +684,7 @@ class PostBox(object):
         else:
             url = url_or_graph
             retrieve_url = merge_get_url(
-                url_or_graph, raw="embed", search="_type=PostBox"
+                url_or_graph, raw="embed", search="\x1etype=PostBox\x1e"
             )
             if not session:
                 session = requests.Session()
@@ -666,16 +718,19 @@ class PostBox(object):
             raise CheckError("Hash algorithm not found")
         if not isinstance(options.get("attestation"), bytes):
             raise CheckError("Attestation not found/wrong type")
-        errors, key_list = AttestationChecker.check_signatures(
+        attestation, errors, key_list = AttestationChecker.check_signatures(
             map(
                 lambda x: (x["key"], x["signature"]),
                 options["signatures"].values()
             ),
             attestation=options["attestation"],
             algo=options["hash_algorithm"]
-        )[1:]
+        )
         if errors:
-            raise CheckError("Missmatch attestation with signatures", *errors)
+            raise CheckError(
+                "Missmatch attestation with signatures",
+                errored=errors, key_list=key_list, attestation=attestation
+            )
         if not checker:
             return {
                 "result": AttestationResult.success,
@@ -687,10 +742,14 @@ class PostBox(object):
         ret = checker.check(
             url,
             key_list,
-            algo=options["hash_algorithm"], auto_add=auto_add, embed=True
+            algo=options["hash_algorithm"], auto_add=auto_add, embed=True,
+            attestation=attestation
         )
         if ret[0] == AttestationResult.error:
-            raise CheckError("Validation failed")
+            raise CheckError(
+                "Checker validation failed",
+                errored=ret[1], key_list=ret[2], attestation=ret[0]
+            )
         return {
             "result": ret[0],
             "errors": ret[1],
@@ -701,10 +760,12 @@ class PostBox(object):
     def check(self, url=None):
         if not url or url.startswith(self.url):
             merged_url, headers = self.merge_and_headers(
-                self.url, raw="embed", search="_type=PostBox"
+                self.url, raw="embed", search="\x1etype=PostBox\x1e"
             )
             response = self.session.get(
-                merge_get_url(merged_url, raw="embed", search="_type=PostBox"),
+                merge_get_url(
+                    merged_url, raw="embed", search="\x1etype=PostBox\x1e"
+                ),
                 headers=headers
             )
             response.raise_for_status()
@@ -720,7 +781,9 @@ class PostBox(object):
                     graph.parse(data=response.content, format="turtle")
         else:
             response = self.session.get(
-                merge_get_url(url, raw="embed", search="_type=PostBox")
+                merge_get_url(
+                    url, raw="embed", search="\x1etype=PostBox\x1e"
+                )
             )
             response.raise_for_status()
             graph = Graph()
@@ -728,7 +791,7 @@ class PostBox(object):
             for page in get_pages(graph):
                 response = self.session.get(
                     merge_get_url(
-                        self.url, raw="embed", search="_type=PostBox",
+                        self.url, raw="embed", search="\x1etype=PostBox\x1e",
                         page=page
                     )
                 )
@@ -758,27 +821,36 @@ class PostBox(object):
 
     def sign(self, confirm=False):
         url, headers = self.merge_and_headers(self.url)
-        check_result = self.simple_check(
-            url, token=headers.get("X-TOKEN"),
-            session=self.session,
+        try:
+            check_result = self.simple_check(
+                url, token=headers.get("X-TOKEN"),
+                session=self.session,
+            )
+            attestation = check_result["attestation"]
+            errored = set(map(lambda x: x[0], check_result["errors"]))
+            key_list = check_result["key_list"]
+            key_hashes = set(map(lambda x: x[0], key_list))
+        except CheckError as exc:
+            if not exc.key_list or not exc.errored or not exc.attestation:
+                raise exc
+            attestation = exc.attestation
+            errored = set(map(lambda x: x[0], exc.errored))
+            key_list = exc.key_list
+            key_hashes = set(map(lambda x: x[0], key_list))
 
-        )
-        errored = set(map(lambda x: x[0], check_result["errors"]))
-
-        key_hashes = set(map(lambda x: x[0], check_result["key_list"]))
         if self.hash_key_public not in key_hashes:
             raise CheckError("Key is not part of chain")
 
         if not confirm:
             return (
                 self.hash_key_public in errored,
-                check_result["key_list"]
+                key_list
             )
         # change to update url
         postbox_update = merge_get_url(
             replace_action(
                 self.url, "update/"
-            ), raw="embed", search="_type=PostBox"
+            ), raw="embed", search="\x1etype=PostBox\x1e"
         )
         # retrieve csrftoken
         response = self.session.get(
@@ -796,8 +868,8 @@ class PostBox(object):
                 """
                     SELECT DISTINCT ?fieldname ?value
                     WHERE {
-                        ?base spkc:fieldname ?fieldname .
-                        ?base spkc:value ?value .
+                        ?base spkc:fieldname ?fieldname ;
+                              spkc:value ?value .
                     }
                 """,
                 initNs={"spkc": spkcgraph},
@@ -805,13 +877,14 @@ class PostBox(object):
             ))
 
         fields["signatures"] = []
+        own_signature = None
         for key in self.client_list:
             if key[0] != self.hash_key_public:
                 signature = key[2]
             else:
                 # currently only one priv key is supported
                 signature = self.priv_key.sign(
-                    check_result["attestation"],
+                    attestation,
                     padding.PSS(
                         mgf=padding.MGF1(self.hash_algo),
                         salt_length=padding.PSS.MAX_LENGTH
@@ -830,6 +903,8 @@ class PostBox(object):
                         )
                     }
                 )
+            if key[0] == self.hash_key_public:
+                own_signature = fields["signatures"][-1]["signature"]
 
         fields["signatures"] = json.dumps(fields["signatures"])
         # update
@@ -841,11 +916,21 @@ class PostBox(object):
         )
         try:
             response.raise_for_status()
+            graph = Graph()
+            graph.parse(data=response.content, format="html")
+            vals = set(extract_property(graph, "signature").values())
+            breakpoint()
+            if own_signature not in vals:
+                raise SrcException("could not update signature", own_signature)
+        except SrcException as exc:
+            raise exc
         except Exception as exc:
-            raise SrcException("could not update signature") from exc
+            raise SrcException(
+                "could not update signature", own_signature
+            ) from exc
         return (
             self.hash_key_public in errored,
-            check_result["key_list"]
+            key_list
         )
 
     @property

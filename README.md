@@ -9,6 +9,7 @@ Design: every key used for encryption must sign the hash from all public key has
 
 # TODO:
 * Webrtc
+* move common dependencies of spkcspider and messaging in extra repository
 
 ### Implement Emails/messaging
 * email to spkcspider transport wrapper (also script)+component (encrypt, transparent gpg)

@@ -27,7 +27,7 @@ def SuccessMessageContentCb(sender, response, **kwargs):
     AssignedContent.objects.filter(
         ctype__name="MessageContent"
     ).exclude(
-        models.Q(attachedtokens__isnull=False) |
+        models.Q(attached_tokens__isnull=False) |
         models.Q(smarttags__name="unread")
     ).delete()
 
@@ -58,7 +58,7 @@ def UpdateKeysCb(sender, instance=None, **kwargs):
         ctype__name="MessageContent"
     ).exclude(
         models.Q(smarttags__name="unread") |
-        models.Q(attachedtokens__isnull=False)
+        models.Q(attached_tokens__isnull=False)
     ).delete()
 
 

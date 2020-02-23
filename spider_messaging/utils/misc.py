@@ -1,17 +1,18 @@
 __all__ = ["EncryptedFile"]
 
 import io
+import base64
 
 
 class EncryptedFile(io.RawIOBase):
     iterob = None
     _left = b""
 
-    def __init__(self, fencryptor, nonce, fileob, headers=""):
-        self.iterob = self.init_iter(fencryptor, nonce, fileob, headers)
+    def __init__(self, fencryptor, fileob, nonce=None, headers=None):
+        self.iterob = self.init_iter(fencryptor, fileob, nonce, headers)
 
     @staticmethod
-    def init_iter(fencryptor, nonce, fileob, headers):
+    def init_iter(fencryptor, fileob, nonce=None, headers=None):
         if isinstance(headers, dict):
             headers = b"\n".join(
                 map(
@@ -21,8 +22,10 @@ class EncryptedFile(io.RawIOBase):
                     )
                 )
             )
-        yield b"%b\0" % nonce
-        yield fencryptor.update(b"%b\n\n" % headers.strip())
+        if nonce:
+            yield b"%b\0" % base64.b64encode(nonce)
+        if headers is not None:
+            yield fencryptor.update(b"%b\n\n" % headers.strip())
         chunk = fileob.read(512)
         while chunk:
             assert isinstance(chunk, bytes)

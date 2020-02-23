@@ -142,11 +142,15 @@ class WebReference(DataContent):
     class Meta:
         proxy = True
 
+    def get_strength_link(self):
+        # for now unlinkable
+        return 11
+
     def get_priority(self):
         return -10
 
     def get_info(self):
-        return super().get_info(unlisted=True)
+        return "%senrypted\x1e" % super().get_info(unlisted=True)
 
     def get_content_name(self):
         url = self.quota_data["url"].split("?", 1)[0]
@@ -374,7 +378,7 @@ class MessageContent(DataContent):
     def get_info(self):
         ret = super().get_info(unlisted=True)
 
-        return "%s%s\x1e" % (
+        return "%s%s\x1eenrypted\x1e" % (
             ret, "\x1epubkeyhash=".join(self.quota_data["key_list"].keys())
         )
 
@@ -416,3 +420,36 @@ class MessageContent(DataContent):
         ret.msgcopies = self.associated.smarttags.filter(keyhashes_q)
         ret["X-KEYLIST"] = json.dumps(self.quota_data["key_list"])
         return ret
+
+
+@add_by_field(registry.contents, "_meta.model_name")
+class Address(DataContent):
+    expose_name = False
+    expose_description = False
+    expose_thirdparty = False
+
+    appearances = [
+        {
+            "name": "Address",
+            "strength": 0
+        },
+    ]
+
+    class Meta:
+        proxy = True
+
+    def get_info(self):
+        ret = super().get_info(unlisted=True)
+        # key_list contains hashes in <algo>=<hash> pattern
+        return "%senrypted\x1e%s\x1e" % (
+            ret, "\x1epubkeyhash=".join(self.quota_data["key_list"].keys())
+        )
+
+    def get_form(self, scope):
+        from .forms import AddressForm
+        return AddressForm
+
+    def map_data(self, name, field, data, graph, context):
+        if name == "key_list":
+            return Literal(json.dumps(data), datatype=XSD.string)
+        return super().map_data(name, field, data, graph, context)

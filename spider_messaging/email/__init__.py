@@ -92,7 +92,7 @@ def main(argv):
             pem_public = pkey.public_key().public_bytes(
                 encoding=serialization.Encoding.PEM,
                 format=serialization.PublicFormat.SubjectPublicKeyInfo
-            )
+            ).strip()
             digest = hashes.Hash(argv.hash, backend=default_backend())
             digest.update(pem_public)
             key_list[digest.finalize().hex()] = pkey

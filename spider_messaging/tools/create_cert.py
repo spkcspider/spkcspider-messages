@@ -1,7 +1,7 @@
 #! /usr/bin/env python3
 
+import os
 import argparse
-# import getpass
 import logging
 import sys
 # import base64
@@ -13,6 +13,8 @@ from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import NameOID
+
+from spider_messaging.utils.keys import load_priv_key
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +30,10 @@ parser.add_argument(
     default="SHA512"
 )
 parser.add_argument(
+    '--overwrite', "-o", action='store_true',
+    help="overwrite private key"
+)
+parser.add_argument(
     '--cert', action="store", default=argparse.SUPPRESS,
     help='Certificate (used for smtp encryption)'
 )
@@ -36,7 +42,7 @@ parser.add_argument(
     help="Keysize for auto generated keys"
 )
 parser.add_argument(
-    '--address', "-a", action='store',
+    '--address', "-a", action='store', nargs="+",
     default="127.0.0.1"
 )
 
@@ -53,26 +59,30 @@ def main(argv):
     )
     argv.hash = getattr(hashes, argv.hash)()
     cert = None
-    pkey = rsa.generate_private_key(
-        public_exponent=65537,
-        key_size=argv.keysize,
-        backend=default_backend()
-    )
-    with open(argv.key, "wb") as f:
-        f.write(
-            pkey.private_bytes(
-                encoding=serialization.Encoding.PEM,
-                format=serialization.PrivateFormat.TraditionalOpenSSL,
-                encryption_algorithm=serialization.NoEncryption(),
-            )
+    if not argv.overwrite and os.path.exists(argv.key):
+        with open(argv.key, "rb") as f:
+            private_key = load_priv_key(f.read())
+    else:
+        private_key = rsa.generate_private_key(
+            public_exponent=65537,
+            key_size=argv.keysize,
+            backend=default_backend()
         )
+        with open(argv.key, "wb") as f:
+            f.write(
+                private_key.private_bytes(
+                    encoding=serialization.Encoding.PEM,
+                    format=serialization.PrivateFormat.TraditionalOpenSSL,
+                    encryption_algorithm=serialization.NoEncryption(),
+                )
+            )
     subject = x509.Name(
         [
             x509.NameAttribute(
                 NameOID.ORGANIZATION_NAME, "spkcspider"
             ),
             x509.NameAttribute(
-                NameOID.COMMON_NAME, argv.address
+                NameOID.COMMON_NAME, argv.address[0]
             ),
         ]
     )
@@ -81,18 +91,19 @@ def main(argv):
         x509.CertificateBuilder()
         .subject_name(subject)
         .issuer_name(subject)
-        .public_key(pkey.public_key())
+        .public_key(private_key.public_key())
         .serial_number(x509.random_serial_number())
         .not_valid_before(dt.utcnow())
         .not_valid_after(dt.utcnow() + td(days=365*20))
     )
-    # cert = cert.add_extension(
-    #    x509.SubjectAlternativeName([x509.DNSName("localhost")]),
-    #    critical=False
-    # )
+    for address in argv.address[1:]:
+        cert = cert.add_extension(
+            x509.SubjectAlternativeName([x509.DNSName(address)]),
+            critical=False
+        )
 
-    cert = cert.sign(pkey, hashes.SHA512(), default_backend())
-    del pkey
+    cert = cert.sign(private_key, hashes.SHA512(), default_backend())
+    del private_key
 
     with open(argv.cert, "wb") as f:
         f.write(cert.public_bytes(serialization.Encoding.PEM))

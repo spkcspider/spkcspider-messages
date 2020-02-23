@@ -36,7 +36,7 @@ class MessageContentView(UserTestMixin, View):
     def get_object(self):
         try:
             return AssignedContent.objects.get(
-                attachedtokens__in=self.receivers,
+                attached_tokens__in=self.receivers,
                 ctype__name="MessageContent"
             )
         except (

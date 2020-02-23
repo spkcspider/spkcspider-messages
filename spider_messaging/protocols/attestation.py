@@ -54,7 +54,7 @@ def _extract_hash_key2(val, algo=None):
             v.public_bytes(
                 encoding=serialization.Encoding.PEM,
                 format=serialization.PublicFormat.SubjectPublicKeyInfo
-            )
+            ).strip()
         )
         return KeyTriple(
             digest.finalize(),
@@ -73,7 +73,7 @@ def _extract_hash_key(val, algo=None, check_hash=False):
             ret[1].public_bytes(
                 encoding=serialization.Encoding.PEM,
                 format=serialization.PublicFormat.SubjectPublicKeyInfo
-            )
+            ).strip()
         )
         if ret[0] != digest.finalize():
             raise ValueError("Key does not match hash")
